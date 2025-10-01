@@ -1,7 +1,23 @@
 services:
+  api:
+    build:
+      context: ../../api
+      dockerfile: Dockerfile
+    container_name: pixie_postgres_api
+    restart: unless-stopped
+    env_file:
+      - ../../.env.dev
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      DB_HOST: db
+
   db:
     image: postgres:18-alpine
-    container_name: pixie_postgres
+    container_name: pixie_postgres_db
     restart: unless-stopped
     env_file:
       - ../../.env.dev
@@ -18,7 +34,7 @@ services:
 
   adminer:
     image: adminer:latest
-    container_name: pixie_adminer
+    container_name: pixie_postgres_adminer
     depends_on:
       - db
     env_file:

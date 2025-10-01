@@ -1,0 +1,27 @@
+[project]
+name = "pixie-tabular-api"
+version = "0.1.0"
+description = "Pixie Tabular API for managing collections and documents"
+authors = [
+  { name = "Philippe Haldermans", email = "philippe.haldermans@pxl.be" }
+]
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.118.0",
+  "uvicorn[standard]>=0.37.0",
+  "sqlalchemy>=2.0.43",
+  "psycopg[binary]>=3.2.10"
+]
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pixie_tabular_api"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/pixie_tabular_api"]
