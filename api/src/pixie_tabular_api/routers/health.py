@@ -15,4 +15,3 @@ def health() -> dict[str, str]:
 
 
 __all__ = ["router"]
-
