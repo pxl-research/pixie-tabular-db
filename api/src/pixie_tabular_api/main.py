@@ -4,7 +4,7 @@ import os
 from fastapi import FastAPI
 
 from .routers import collections, health
-from .services import AttributeDescriberLLM, AzureOpenAILLM
+from .services import AttributeDescriberLLM, AttributeRankerLLM, AzureOpenAILLM
 
 
 def create_app() -> FastAPI:
@@ -36,6 +36,7 @@ def _configure_attribute_describer(app: FastAPI) -> None:
             deployment=deployment,
         )
         app.state.attribute_describer_llm = AttributeDescriberLLM(azure_llm)
+        app.state.attribute_ranker_llm = AttributeRankerLLM(azure_llm)
     except Exception as exc:  # pragma: no cover - configuration/runtime specific
         logging.error("Failed to initialise attribute describer LLM: %s", exc)
 

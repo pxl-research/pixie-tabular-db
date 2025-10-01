@@ -8,7 +8,7 @@ from .documents import (
     parse_document,
 )
 from .attribute_describer import describe_attributes
-from .llms import AttributeDescriberLLM, AzureOpenAILLM
+from .llms import AttributeDescriberLLM, AttributeRankerLLM, AzureOpenAILLM
 
 __all__ = [
     "DocumentParseError",
@@ -18,5 +18,6 @@ __all__ = [
     "parse_document",
     "describe_attributes",
     "AttributeDescriberLLM",
+    "AttributeRankerLLM",
     "AzureOpenAILLM",
 ]

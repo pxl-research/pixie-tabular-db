@@ -13,6 +13,7 @@ from ..database import get_db
 from ..schemas import Collection, CollectionCreate, Document
 from ..services import (
     AttributeDescriberLLM,
+    AttributeRankerLLM,
     DocumentParseError,
     EmptyDocumentError,
     UnsupportedDocumentType,
@@ -83,6 +84,15 @@ def get_attribute_describer_llm(request: Request) -> AttributeDescriberLLM:
     return llm
 
 
+def get_attribute_ranker_llm(request: Request) -> AttributeRankerLLM:
+    llm = getattr(request.app.state, "attribute_ranker_llm", None)
+    if llm is None:
+        raise HTTPException(
+            status_code=503, detail="Attribute ranking service is unavailable"
+        )
+    return llm
+
+
 @router.post("/{collection_name}/documents", response_model=Document, status_code=201)
 async def add_document(
     collection_name: str,
@@ -93,6 +103,7 @@ async def add_document(
     attribute_describer_llm: AttributeDescriberLLM = Depends(
         get_attribute_describer_llm
     ),
+    attribute_ranker_llm: AttributeRankerLLM = Depends(get_attribute_ranker_llm),
 ) -> Document:
     trimmed_name = collection_name.strip()
     if not trimmed_name:
@@ -131,6 +142,7 @@ async def add_document(
             file_schema=inferred_schema,
             df=df,
             attribute_describer_llm=attribute_describer_llm,
+            attribute_ranker_llm=attribute_ranker_llm,
         )
     except Exception as exc:  # pragma: no cover - defensive path
         logging.error("Failed to generate attribute descriptions: %s", exc)

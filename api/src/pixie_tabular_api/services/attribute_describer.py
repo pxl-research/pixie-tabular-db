@@ -4,6 +4,7 @@ from typing import Any
 import pandas as pd
 
 from .llms.attribute_describer_llm import AttributeDescriberLLM
+from .llms.attribute_ranker_llm import AttributeRankerLLM
 
 
 def describe_attributes(
@@ -12,10 +13,11 @@ def describe_attributes(
     file_schema: dict[str, str],
     df: pd.DataFrame,
     attribute_describer_llm: AttributeDescriberLLM,
+    attribute_ranker_llm: AttributeRankerLLM,
 ) -> dict[str, dict[str, Any]]:
     """
-    Describe attributes based on the file schema and DataFrame.
-    Returns a dictionary with attribute names as keys and their descriptions as values.
+    Describe attributes based on the file schema and DataFrame, and rank them by usefulness.
+    Returns a dictionary with attribute names as keys and metadata (type, description, rank, ...).
     """
     attribute_descriptions = {}
 
@@ -63,5 +65,27 @@ def describe_attributes(
         )
 
         attribute_descriptions[column_name] = attribute_dict
+
+    try:
+        ranking = attribute_ranker_llm.rank(
+            table_name=file_name,
+            table_description=file_description,
+            attributes=attribute_descriptions,
+        )
+    except Exception as exc:  # pragma: no cover - relies on external service
+        logging.error("Failed to obtain attribute ranking: %s", exc)
+        ranking = {}
+
+    if ranking:
+        for column_name, rank in ranking.items():
+            if column_name in attribute_descriptions:
+                attribute_descriptions[column_name]["rank"] = rank
+
+        # For attributes not mentioned by the ranker, append ranks after the provided ones.
+        max_rank = max(ranking.values(), default=0)
+        for column_name in attribute_descriptions:
+            if "rank" not in attribute_descriptions[column_name]:
+                max_rank += 1
+                attribute_descriptions[column_name]["rank"] = max_rank
 
     return attribute_descriptions
