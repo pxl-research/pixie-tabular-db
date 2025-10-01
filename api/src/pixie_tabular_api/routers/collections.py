@@ -226,6 +226,64 @@ async def add_document(
     )
 
 
+@router.delete(
+    "/{collection_name}/documents/{document_name}", status_code=204
+)
+def delete_document(
+    collection_name: str,
+    document_name: str,
+    db: Session = Depends(get_db),
+) -> None:
+    trimmed_collection = collection_name.strip()
+    trimmed_document = document_name.strip()
+
+    if not trimmed_collection or not trimmed_document:
+        raise HTTPException(status_code=400, detail="Collection and document names are required")
+
+    collection_row = db.execute(
+        text("SELECT id FROM tabular_collections WHERE name = :name"),
+        {"name": trimmed_collection},
+    ).fetchone()
+    if collection_row is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    mapping = db.execute(
+        text(
+            """
+            DELETE FROM tabular_collection_entries
+            WHERE collection_id = :collection_id AND file_name = :file_name
+            RETURNING document_id
+            """
+        ),
+        {"collection_id": collection_row.id, "file_name": trimmed_document},
+    ).fetchone()
+
+    if mapping is None:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Document not found in collection")
+
+    try:
+        remaining_link = db.execute(
+            text(
+                "SELECT 1 FROM tabular_collection_entries WHERE document_id = :document_id LIMIT 1"
+            ),
+            {"document_id": mapping.document_id},
+        ).fetchone()
+
+        if remaining_link is None:
+            db.execute(
+                text("DELETE FROM tabular_documents WHERE id = :document_id"),
+                {"document_id": mapping.document_id},
+            )
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return None
+
+
 def _infer_schema(df: pd.DataFrame, columns: List[str]) -> dict[str, str]:
     schema: dict[str, str] = {}
     for column in columns:

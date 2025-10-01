@@ -10,7 +10,7 @@ class LLM(ABC):
         self._client: Any | None = client
 
     @abstractmethod
-    def invoke(self, messages: Sequence[Any]) -> Any:
+    def invoke(self, messages: Sequence[Any], **kwargs: Any) -> Any:
         """Execute the underlying LLM with the provided messages."""
         raise NotImplementedError
 

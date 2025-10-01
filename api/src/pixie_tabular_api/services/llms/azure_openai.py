@@ -26,7 +26,7 @@ class AzureOpenAILLM(LLM):
         super().__init__(deployment, client=client)
         self._temperature = default_temperature
 
-    def invoke(self, messages: Iterable[Any]) -> Any:
+    def invoke(self, messages: Iterable[Any], **kwargs: Any) -> Any:
         chat_messages = [
             {
                 "role": _map_role(getattr(message, "type", "user")),
@@ -39,6 +39,7 @@ class AzureOpenAILLM(LLM):
             model=self.model_name,
             messages=chat_messages,
             temperature=self._temperature,
+            **kwargs,
         )
         return completion.choices[0].message if completion.choices else None
 

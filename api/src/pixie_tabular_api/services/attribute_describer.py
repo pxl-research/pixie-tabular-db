@@ -87,5 +87,10 @@ def describe_attributes(
             if "rank" not in attribute_descriptions[column_name]:
                 max_rank += 1
                 attribute_descriptions[column_name]["rank"] = max_rank
+        return attribute_descriptions
+
+    # If the LLM could not provide a ranking, fall back to a deterministic order.
+    for idx, column_name in enumerate(attribute_descriptions.keys(), start=1):
+        attribute_descriptions[column_name]["rank"] = idx
 
     return attribute_descriptions
