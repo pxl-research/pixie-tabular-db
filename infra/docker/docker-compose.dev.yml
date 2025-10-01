@@ -4,12 +4,12 @@ services:
     container_name: pixie_postgres
     restart: unless-stopped
     env_file:
-      - .env.dev
+      - ../../.env.dev
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ../../db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB || exit 1"]
       interval: 5s
@@ -22,11 +22,11 @@ services:
     depends_on:
       - db
     env_file:
-      - .env.dev
+      - ../../.env.dev
     environment:
       ADMINER_DEFAULT_SERVER: db
     ports:
       - "${ADMINER_PORT:-8080}:8080"
 
 volumes:
-  dbdata:
+  pgdata:
