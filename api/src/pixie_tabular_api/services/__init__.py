@@ -1,5 +1,7 @@
 """Service layer utilities for Pixie Tabular."""
 
+from .attribute_analyzer import analyze_attribute
+from .attribute_describer import describe_attributes
 from .documents import (
     DocumentParseError,
     EmptyDocumentError,
@@ -7,7 +9,6 @@ from .documents import (
     UnsupportedDocumentType,
     parse_document,
 )
-from .attribute_describer import describe_attributes
 from .llms import AttributeDescriberLLM, AttributeRankerLLM, AzureOpenAILLM
 
 __all__ = [
@@ -16,6 +17,7 @@ __all__ = [
     "ParsedDocument",
     "UnsupportedDocumentType",
     "parse_document",
+    "analyze_attribute",
     "describe_attributes",
     "AttributeDescriberLLM",
     "AttributeRankerLLM",

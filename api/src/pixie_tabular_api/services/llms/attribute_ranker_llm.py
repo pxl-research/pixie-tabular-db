@@ -1,9 +1,10 @@
+"""Rank attributes by usefulness for customer decision making."""
+
 from __future__ import annotations
 
 import json
 import logging
-import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -15,15 +16,6 @@ class AttributeRankerLLM:
 
     def __init__(self, llm: LLM):
         self.llm = llm
-        self.system_prompt_template = """
-You are an assistant that helps customers choose the best product using tabular data.
-Your response MUST be valid JSON with the structure {{"ranking": {{"attribute_name": rank, ...}}}},
-where rank 1 is most useful and ranks are consecutive integers without ties. Do not include
-any additional keys, commentary, or formatting.
-
-Input data (JSON):
-{payload}
-"""
 
     def rank(
         self,
@@ -32,27 +24,46 @@ Input data (JSON):
         table_description: str,
         attributes: Dict[str, Dict[str, Any]],
     ) -> Dict[str, int]:
+        """
+        Rank attributes by usefulness for customer decisions.
+
+        Returns a dictionary mapping attribute names to ranks, where rank 1 is most useful.
+        """
         if not attributes:
             return {}
 
+        prompt = self._build_prompt(table_name, table_description, attributes)
+        response = self._call_llm(prompt)
+
+        if not response:
+            return {}
+
+        return _parse_ranking(response)
+
+    def _build_prompt(self, table_name: str, description: str, attributes: Dict) -> str:
+        """Build the ranking prompt with input data."""
         payload = json.dumps(
             {
                 "table_name": table_name,
-                "table_description": table_description or "",
+                "table_description": description or "",
                 "attributes": attributes,
             },
             ensure_ascii=False,
         )
 
-        prompt = self.system_prompt_template.format(payload=payload)
+        return f"""
+You are ranking table attributes by usefulness for customer decisions.
+Return ONLY valid JSON: {{"ranking": {{"attribute_name": rank, ...}}}}
+Rank 1 is most useful. Use consecutive integers.
 
+Data:
+{payload}
+"""
+
+    def _call_llm(self, prompt: str) -> str | None:
+        """Call LLM with JSON mode, fallback to regular if needed."""
         messages = [
-            SystemMessage(
-                content=(
-                    "You MUST respond with strict JSON. The response body must be a JSON object "
-                    "containing a single property named 'ranking'."
-                )
-            ),
+            SystemMessage(content="Respond with valid JSON only: {'ranking': {...}}"),
             HumanMessage(content=prompt),
         ]
 
@@ -62,122 +73,45 @@ Input data (JSON):
                 response_format={"type": "json_object"},
             )
         except Exception as exc:
-            logging.debug(
-                "Attribute ranking JSON mode failed (%s); retrying without response_format",
-                exc,
-            )
-            response = self.llm.invoke(messages)
+            logging.debug("JSON mode failed (%s), retrying without", exc)
+            try:
+                response = self.llm.invoke(messages)
+            except Exception:
+                return None
 
-        try:
-            if response is None:
-                return {}
-            content = getattr(response, "content", None)
-            if isinstance(content, list):
-                content = "\n".join(
-                    part.get("text", "") for part in content if isinstance(part, dict)
-                )
-            if not isinstance(content, str):
-                return {}
-            logging.debug("Attribute ranking raw response: %s", content)
-            return _parse_ranking(content)
-        except Exception as exc:  # pragma: no cover - relies on external service
-            logging.error("Failed to obtain attribute ranking: %s", exc)
-            return {}
+        if not response:
+            return None
+
+        content = getattr(response, "content", None)
+        if isinstance(content, list):
+            content = "\n".join(
+                part.get("text", "") for part in content if isinstance(part, dict)
+            )
+
+        return str(content) if content else None
+
 
 def _parse_ranking(content: str) -> Dict[str, int]:
-    raw = content.strip()
-    if raw.startswith("```"):
-        raw = _strip_code_fence(raw)
+    """Parse LLM response to ranking dict."""
+    try:
+        data = json.loads(content.strip())
 
-    parsed = _load_json(raw)
-    if parsed is None:
-        enumerated = _parse_enumerated_lines(raw)
-        if enumerated:
-            return enumerated
+        # Extract ranking dict
+        if isinstance(data, dict) and "ranking" in data:
+            ranking = data["ranking"]
+        else:
+            ranking = data
+
+        if not isinstance(ranking, dict):
+            return {}
+
+        # Normalize to consecutive integers
+        items = sorted(ranking.items(), key=lambda x: (int(x[1]), x[0]))
+        return {name: idx for idx, (name, _) in enumerate(items, start=1)}
+
+    except (json.JSONDecodeError, ValueError, TypeError):
+        logging.warning("Could not parse ranking from: %s", content[:100])
         return {}
-
-    if isinstance(parsed, dict) and "ranking" in parsed:
-        parsed = parsed["ranking"]
-
-    ranking: Dict[str, int] = {}
-    if isinstance(parsed, dict):
-        for key, value in parsed.items():
-            rank = _to_int(value)
-            if rank is not None:
-                ranking[str(key)] = rank
-    elif isinstance(parsed, list):
-        if all(isinstance(item, str) for item in parsed):
-            return {str(name): idx for idx, name in enumerate(parsed, start=1)}
-        for item in parsed:
-            if isinstance(item, dict):
-                name = item.get("attribute") or item.get("name")
-                rank = _to_int(item.get("rank"))
-                if name and rank is not None:
-                    ranking[str(name)] = rank
-            elif isinstance(item, (list, tuple)) and len(item) >= 2:
-                name = item[0]
-                rank = _to_int(item[1])
-                if name and rank is not None:
-                    ranking[str(name)] = rank
-
-    # Normalise ranks to consecutive integers starting from 1 if possible.
-    if ranking:
-        ordered_items = sorted(ranking.items(), key=lambda kv: (kv[1], kv[0]))
-        normalised: Dict[str, int] = {}
-        for idx, (name, _) in enumerate(ordered_items, start=1):
-            normalised[name] = idx
-        return normalised
-
-    return {}
-
-
-_ENUMERATION_PATTERN = re.compile(r"^\s*(\d+)[\.:)\-]\s*(.+)$")
-
-
-def _parse_enumerated_lines(raw: str) -> Dict[str, int]:
-    ranking: Dict[str, int] = {}
-    for line in raw.splitlines():
-        match = _ENUMERATION_PATTERN.match(line)
-        if not match:
-            continue
-        rank = _to_int(match.group(1))
-        name = match.group(2).strip()
-        if rank is None or not name:
-            continue
-        ranking[name] = rank
-
-    if ranking:
-        ordered = sorted(ranking.items(), key=lambda kv: (kv[1], kv[0]))
-        return {name: idx for idx, (name, _) in enumerate(ordered, start=1)}
-
-    return {}
-
-
-def _strip_code_fence(text: str) -> str:
-    lines = [line for line in text.splitlines() if not line.startswith("```")]
-    return "\n".join(lines).strip()
-
-
-def _load_json(raw: str) -> Optional[Any]:
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            snippet = raw[start : end + 1]
-            try:
-                return json.loads(snippet)
-            except json.JSONDecodeError:
-                return None
-        return None
-
-
-def _to_int(value: Any) -> Optional[int]:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
 
 
 __all__ = ["AttributeRankerLLM"]
