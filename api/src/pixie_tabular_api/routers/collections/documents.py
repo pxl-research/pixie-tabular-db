@@ -26,6 +26,8 @@ from .dependencies import get_attribute_describer_llm, get_attribute_ranker_llm
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(slots=True)
 class PreparedDocument:
@@ -63,6 +65,12 @@ def add_document(
 
     file_name, content = _read_uploaded_file(file)
     parsed_documents = _parse_uploaded_documents(file_name, content)
+    logger.info(
+        "Parsing upload '%s' for collection '%s' into %d document(s)",
+        file_name,
+        collection,
+        len(parsed_documents),
+    )
 
     prepared_documents = _prepare_documents(
         file_name=file_name,
@@ -75,12 +83,20 @@ def add_document(
         attribute_ranker_llm=attribute_ranker_llm,
     )
 
-    return _store_documents(
+    stored_documents = _store_documents(
         db=db,
         collection_id=collection_id,
         collection_name=collection,
         prepared_documents=prepared_documents,
     )
+    logger.info(
+        "Stored %d document(s) from upload '%s' in collection '%s'",
+        len(stored_documents),
+        file_name,
+        collection,
+    )
+
+    return stored_documents
 
 
 def _normalize_collection_name(collection_name: str) -> str:
@@ -179,7 +195,7 @@ def _prepare_documents(
                 attribute_ranker_llm=attribute_ranker_llm,
             )
         except Exception as exc:  # pragma: no cover - defensive path
-            logging.error(
+            logger.error(
                 "Failed to generate attribute descriptions for product '%s': %s",
                 product_name,
                 exc,
@@ -282,6 +298,11 @@ def _store_documents(
     except IntegrityError as exc:
         db.rollback()
         msg = str(exc).lower()
+        logger.warning(
+            "Constraint violation while storing document(s) for collection '%s': %s",
+            collection_name,
+            exc,
+        )
         if "tabular_documents" in msg or "collection_id" in msg:
             raise HTTPException(
                 status_code=409,
@@ -297,6 +318,10 @@ def _store_documents(
         raise
     except Exception:
         db.rollback()
+        logger.exception(
+            "Unexpected error while storing document(s) for collection '%s'",
+            collection_name,
+        )
         raise
 
     return documents_response
@@ -418,6 +443,11 @@ def delete_document(
         except Exception:
             db.rollback()
             raise
+        logger.info(
+            "Deleted document(s) for collection '%s' via file identifier '%s'",
+            trimmed_collection,
+            trimmed_identifier,
+        )
         return None
 
     # Fall back to deleting by product name
@@ -444,6 +474,11 @@ def delete_document(
     except Exception:
         db.rollback()
         raise
+    logger.info(
+        "Deleted document(s) for collection '%s' via product identifier '%s'",
+        trimmed_collection,
+        trimmed_identifier,
+    )
 
 def _ensure_json_dict(value: Any) -> Dict[str, Any]:
     """Best-effort conversion from JSONB/str payload to a dictionary."""

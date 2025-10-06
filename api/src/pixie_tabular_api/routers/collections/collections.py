@@ -1,3 +1,4 @@
+import logging
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...schemas import Collection, CollectionCreate
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -26,6 +29,7 @@ def create_collection(
             db.rollback()
             raise HTTPException(status_code=500, detail="Failed to create collection")
         db.commit()
+        logger.info("Created collection '%s' (id=%s)", row.name, row.id)
         return Collection(id=row.id, name=row.name)
     except Exception as exc:  # pragma: no cover - bubble-up unknown database errors
         db.rollback()
@@ -34,6 +38,10 @@ def create_collection(
             raise HTTPException(
                 status_code=409, detail="Collection name already exists"
             ) from exc
+        logger.exception(
+            "Unexpected database error while creating collection '%s'",
+            payload.name,
+        )
         raise
 
 
@@ -57,6 +65,7 @@ def delete_collection(collection_name: str, db: Session = Depends(get_db)) -> No
         db.rollback()
         raise HTTPException(status_code=404, detail="Collection not found")
     db.commit()
+    logger.info("Deleted collection '%s' (id=%s)", trimmed_name, row.id)
     return None
 
 

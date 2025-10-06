@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -11,6 +12,8 @@ from ...schemas import AttributeRangeFilter, DocumentQueryRequest, DocumentQuery
 _NUMERIC_REGEX_SQL = "^\\s*-?[0-9]+(?:\\.[0-9]+)?\\s*$"
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 @router.post("/{product_name}/query", response_model=DocumentQueryResponse)
@@ -28,6 +31,15 @@ def query_document_rows(
             status_code=400,
             detail="Collection and product names are required",
         )
+
+    logger.info(
+        "Querying collection '%s', product '%s' with %d filter(s) (limit=%d, offset=%d)",
+        trimmed_collection,
+        trimmed_product,
+        len(payload.filters),
+        payload.limit,
+        payload.offset,
+    )
 
     document_row = db.execute(
         text(

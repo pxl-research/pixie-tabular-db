@@ -29,6 +29,7 @@ docker compose -f infra/docker/docker-compose.dev.yml up --build
 ```
 
 De API draait daarna op http://localhost:8000, Postgres op poort 5432 en Adminer op 8080.
+Stel het logniveau in via `LOG_LEVEL` in `.env.dev` (standaard `INFO`).
 
 ---
 
@@ -51,4 +52,3 @@ Wanneer Azure OpenAI-variabelen ontbreken, slaat de API enkel de ruwe schema- en
 - `api/src/pixie_tabular_api/routers/collections/documents.py` – stap-voor-stap verwerking van uploads.
 - `db/init.sql` – schema van de PostgreSQL-tabellen.
 - `infra/docker/docker-compose.dev.yml` – voorbeeldconfiguratie voor lokale ontwikkeling.
-

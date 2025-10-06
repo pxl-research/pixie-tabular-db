@@ -22,6 +22,8 @@ class Settings:
     azure_openai_api_version: Optional[str] = None
     azure_openai_model_version: Optional[str] = None
 
+    log_level: str = "INFO"
+
     @property
     def database_url(self) -> str:
         if self.postgres_password is None:
@@ -57,6 +59,7 @@ def _read_settings() -> Settings:
         azure_openai_api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         azure_openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
         azure_openai_model_version=os.getenv("AZURE_OPENAI_MODEL_VERSION"),
+        log_level=os.getenv("LOG_LEVEL", "INFO"),
     )
 
 
