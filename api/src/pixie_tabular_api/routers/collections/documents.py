@@ -1,10 +1,10 @@
 import json
 import logging
 from hashlib import sha256
-from typing import Any, List
+from typing import Any, Dict, List
 
 import pandas as pd
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -25,11 +25,11 @@ from .dependencies import get_attribute_describer_llm, get_attribute_ranker_llm
 router = APIRouter()
 
 
-@router.post("/", response_model=Document, status_code=201)
+@router.post("/", response_model=List[Document], status_code=201)
 def add_document(
     collection_name: str,
     file: UploadFile = File(...),
-    product_name: str = Form(...),
+    product_prefix: str | None = Form(default=None),
     language: str | None = Form(default=None),
     description: str | None = Form(default=None),
     db: Session = Depends(get_db),
@@ -37,7 +37,7 @@ def add_document(
         get_attribute_describer_llm
     ),
     attribute_ranker_llm: AttributeRankerLLM = Depends(get_attribute_ranker_llm),
-) -> Document:
+) -> List[Document]:
     trimmed_name = collection_name.strip()
     if not trimmed_name:
         raise HTTPException(status_code=400, detail="Collection name is required")
@@ -49,10 +49,6 @@ def add_document(
     if collection_row is None:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    trimmed_product = product_name.strip()
-    if not trimmed_product:
-        raise HTTPException(status_code=400, detail="Product name is required")
-
     file.file.seek(0)
     content = file.file.read()
     if not content:
@@ -61,7 +57,7 @@ def add_document(
     file_name = file.filename or "uploaded_document"
 
     try:
-        parsed = parse_document(file_name, content)
+        parsed_documents = parse_document(file_name, content)
     except EmptyDocumentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UnsupportedDocumentType as exc:
@@ -69,110 +65,243 @@ def add_document(
     except DocumentParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    file_hash = sha256(content).hexdigest()
+    base_hash = sha256(content).hexdigest()
+    multi_sheet = len(parsed_documents) > 1
+    seen_products: set[str] = set()
+    prepared_documents: List[dict[str, Any]] = []
 
-    df = pd.DataFrame(parsed.rows)
-    inferred_schema = _infer_schema(df, parsed.columns)
-    try:
-        attribute_descriptions = describe_attributes(
-            file_name=file_name,
-            file_description=description or "",
-            file_schema=inferred_schema,
-            df=df,
-            attribute_describer_llm=attribute_describer_llm,
-            attribute_ranker_llm=attribute_ranker_llm,
+    for index, parsed_document in enumerate(parsed_documents, start=1):
+        source_name = getattr(parsed_document, "source_name", None)
+        default_name = source_name or f"Sheet {index}"
+
+        if product_prefix and product_prefix.strip():
+            trimmed_product = f"{product_prefix.strip()} {index}"
+        else:
+            trimmed_product = default_name
+        if not trimmed_product:
+            raise HTTPException(
+                status_code=400,
+                detail="Product name is required",
+            )
+
+        if trimmed_product in seen_products:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Duplicate product name '{trimmed_product}' in upload",
+            )
+        seen_products.add(trimmed_product)
+
+        sheet_description = description.strip() if description and description.strip() else None
+
+        sheet_hash = (
+            base_hash
+            if not multi_sheet
+            else sha256(f"{base_hash}:{trimmed_product}".encode("utf-8")).hexdigest()
         )
-    except Exception as exc:  # pragma: no cover - defensive path
-        logging.error("Failed to generate attribute descriptions: %s", exc)
-        attribute_descriptions = {}
 
-    try:
-        document_id = db.execute(
-            text(
-                """
-                INSERT INTO tabular_documents (
-                    file_name,
-                    file_hash,
-                    language,
-                    file_description,
-                    file_schema,
-                    attribute_descriptions
-                )
-                VALUES (:file_name, :file_hash, :language, :file_description, :file_schema, :attribute_descriptions)
-                RETURNING id
-                """
-            ),
+        df = pd.DataFrame(parsed_document.rows)
+        inferred_schema = _infer_schema(df, parsed_document.columns)
+
+        llm_table_name = (
+            file_name if not multi_sheet else f"{file_name}::{trimmed_product}"
+        )
+
+        try:
+            attribute_descriptions = describe_attributes(
+                file_name=llm_table_name,
+                file_description=sheet_description or "",
+                file_schema=inferred_schema,
+                df=df,
+                attribute_describer_llm=attribute_describer_llm,
+                attribute_ranker_llm=attribute_ranker_llm,
+            )
+        except Exception as exc:  # pragma: no cover - defensive path
+            logging.error(
+                "Failed to generate attribute descriptions for product '%s': %s",
+                trimmed_product,
+                exc,
+            )
+            attribute_descriptions = {}
+
+        prepared_documents.append(
             {
                 "file_name": file_name,
-                "file_hash": file_hash,
-                "language": language,
-                "file_description": description,
-                "file_schema": json.dumps(
-                    {"columns": parsed.columns, "field_types": inferred_schema}
-                ),
-                "attribute_descriptions": json.dumps(
-                    attribute_descriptions, default=_json_default
-                ),
-            },
-        ).scalar_one()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Document already exists") from exc
-
-    try:
-        _bulk_insert_rows(db, document_id, parsed.rows)
-
-        db.execute(
-            text(
-                """
-                INSERT INTO tabular_collection_entries (collection_id, product_name, file_name, document_id)
-                VALUES (:collection_id, :product_name, :file_name, :document_id)
-                """
-            ),
-            {
-                "collection_id": collection_row.id,
+                "file_hash": sheet_hash,
                 "product_name": trimmed_product,
-                "file_name": file_name,
-                "document_id": document_id,
-            },
+                "language": language,
+                "file_description": sheet_description,
+                "file_schema": {
+                    "columns": parsed_document.columns,
+                    "field_types": inferred_schema,
+                },
+                "attribute_descriptions": attribute_descriptions,
+                "rows": parsed_document.rows,
+            }
         )
+
+    documents_response: List[Document] = []
+
+    try:
+        for prepared in prepared_documents:
+            document_id = db.execute(
+                text(
+                    """
+                    INSERT INTO tabular_documents (
+                        collection_id,
+                        product_name,
+                        file_name,
+                        file_hash,
+                        language,
+                        file_description,
+                        file_schema,
+                        attribute_descriptions
+                    )
+                    VALUES (
+                        :collection_id,
+                        :product_name,
+                        :file_name,
+                        :file_hash,
+                        :language,
+                        :file_description,
+                        :file_schema,
+                        :attribute_descriptions
+                    )
+                    RETURNING id
+                    """
+                ),
+                {
+                    "collection_id": collection_row.id,
+                    "product_name": prepared["product_name"],
+                    "file_name": prepared["file_name"],
+                    "file_hash": prepared["file_hash"],
+                    "language": prepared["language"],
+                    "file_description": prepared["file_description"],
+                    "file_schema": json.dumps(prepared["file_schema"]),
+                    "attribute_descriptions": json.dumps(
+                        prepared["attribute_descriptions"], default=_json_default
+                    ),
+                },
+            ).scalar_one()
+
+            _bulk_insert_rows(db, document_id, prepared["rows"])
+
+            documents_response.append(
+                Document(
+                    id=document_id,
+                    file_name=prepared["file_name"],
+                    collection=trimmed_name,
+                    product=prepared["product_name"],
+                    row_count=len(prepared["rows"]),
+                    columns=prepared["file_schema"]["columns"],
+                    attribute_descriptions=prepared["attribute_descriptions"],
+                )
+            )
+
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         msg = str(exc).lower()
-        if "tabular_collection_entries" in msg:
+        if "tabular_documents" in msg or "collection_id" in msg:
             raise HTTPException(
                 status_code=409,
                 detail="Product already has a document in this collection",
             ) from exc
+        if "file_hash" in msg:
+            raise HTTPException(
+                status_code=409, detail="Document already exists"
+            ) from exc
+        raise
+    except HTTPException:
+        db.rollback()
         raise
     except Exception:
         db.rollback()
         raise
 
-    return Document(
-        id=document_id,
-        file_name=file_name,
-        collection=trimmed_name,
-        product=trimmed_product,
-        row_count=len(parsed.rows),
-        columns=parsed.columns,
-        attribute_descriptions=attribute_descriptions,
-    )
+    return documents_response
 
 
-@router.delete("/{document_name}", status_code=204)
+@router.get("/", response_model=List[Document])
+def list_documents(
+    collection_name: str,
+    db: Session = Depends(get_db),
+) -> List[Document]:
+    trimmed_collection = collection_name.strip()
+    if not trimmed_collection:
+        raise HTTPException(status_code=400, detail="Collection name is required")
+
+    collection_row = db.execute(
+        text("SELECT id FROM tabular_collections WHERE name = :name"),
+        {"name": trimmed_collection},
+    ).fetchone()
+
+    if collection_row is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                d.id,
+                d.file_name,
+                d.file_schema,
+                d.attribute_descriptions,
+                d.product_name,
+                (
+                    SELECT COUNT(*)
+                    FROM tabular_rows r
+                    WHERE r.file_id = d.id
+                ) AS row_count
+            FROM tabular_documents d
+            WHERE d.collection_id = :collection_id
+            ORDER BY d.product_name ASC, d.file_name ASC
+            """
+        ),
+        {"collection_id": collection_row.id},
+    ).fetchall()
+
+    documents: List[Document] = []
+    for row in rows:
+        file_schema = _ensure_json_dict(row.file_schema)
+        attribute_descriptions = _ensure_json_dict(row.attribute_descriptions)
+        columns = file_schema.get("columns")
+        if not isinstance(columns, list):
+            columns = []
+
+        row_count = row.row_count
+        try:
+            row_count_int = int(row_count)
+        except (TypeError, ValueError):
+            row_count_int = 0
+
+        documents.append(
+            Document(
+                id=row.id,
+                file_name=row.file_name,
+                collection=trimmed_collection,
+                product=row.product_name,
+                row_count=row_count_int,
+                columns=columns,
+                attribute_descriptions=attribute_descriptions or None,
+            )
+        )
+
+    return documents
+
+
+@router.delete("/{identifier}", status_code=204)
 def delete_document(
     collection_name: str,
-    document_name: str,
-    product_name: str | None = Query(default=None),
+    identifier: str,
     db: Session = Depends(get_db),
 ) -> None:
     trimmed_collection = collection_name.strip()
-    trimmed_document = document_name.strip()
+    trimmed_identifier = identifier.strip()
 
-    if not trimmed_collection or not trimmed_document:
-        raise HTTPException(status_code=400, detail="Collection and document names are required")
+    if not trimmed_collection or not trimmed_identifier:
+        raise HTTPException(
+            status_code=400, detail="Collection and identifier are required"
+        )
 
     collection_row = db.execute(
         text("SELECT id FROM tabular_collections WHERE name = :name"),
@@ -181,47 +310,47 @@ def delete_document(
     if collection_row is None:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    target_product: str | None = None
+    # Attempt full upload deletion by matching file name first
+    file_match = db.execute(
+        text(
+            """
+            SELECT id
+            FROM tabular_documents
+            WHERE collection_id = :collection_id AND file_name = :file_name
+            """
+        ),
+        {"collection_id": collection_row.id, "file_name": trimmed_identifier},
+    ).fetchall()
 
-    if product_name is not None:
-        trimmed_product = product_name.strip()
-        if not trimmed_product:
-            raise HTTPException(status_code=400, detail="Product name cannot be empty")
-        target_product = trimmed_product
-    else:
-        product_rows = db.execute(
-            text(
-                """
-                SELECT product_name FROM tabular_collection_entries
-                WHERE collection_id = :collection_id AND file_name = :file_name
-                """
-            ),
-            {"collection_id": collection_row.id, "file_name": trimmed_document},
-        ).fetchall()
-        if not product_rows:
-            db.rollback()
-            raise HTTPException(status_code=404, detail="Document not found in collection")
-        if len(product_rows) > 1:
-            raise HTTPException(
-                status_code=409,
-                detail="Multiple products reference this document; specify product_name",
+    if file_match:
+        try:
+            db.execute(
+                text(
+                    """
+                    DELETE FROM tabular_documents
+                    WHERE collection_id = :collection_id AND file_name = :file_name
+                    """
+                ),
+                {"collection_id": collection_row.id, "file_name": trimmed_identifier},
             )
-        target_product = product_rows[0].product_name
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        return None
 
+    # Fall back to deleting by product name
     mapping = db.execute(
         text(
             """
-            DELETE FROM tabular_collection_entries
-            WHERE collection_id = :collection_id
-                AND file_name = :file_name
-                AND product_name = :product_name
-            RETURNING document_id, product_name
+            DELETE FROM tabular_documents
+            WHERE collection_id = :collection_id AND product_name = :product_name
+            RETURNING id
             """
         ),
         {
             "collection_id": collection_row.id,
-            "file_name": trimmed_document,
-            "product_name": target_product,
+            "product_name": trimmed_identifier,
         },
     ).fetchone()
 
@@ -230,25 +359,24 @@ def delete_document(
         raise HTTPException(status_code=404, detail="Document not found in collection")
 
     try:
-        remaining_link = db.execute(
-            text(
-                "SELECT 1 FROM tabular_collection_entries WHERE document_id = :document_id LIMIT 1"
-            ),
-            {"document_id": mapping.document_id},
-        ).fetchone()
-
-        if remaining_link is None:
-            db.execute(
-                text("DELETE FROM tabular_documents WHERE id = :document_id"),
-                {"document_id": mapping.document_id},
-            )
-
         db.commit()
     except Exception:
         db.rollback()
         raise
 
-    return None
+def _ensure_json_dict(value: Any) -> Dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+            if isinstance(decoded, dict):
+                return decoded
+        except json.JSONDecodeError:
+            return {}
+    return {}
 
 
 def _bulk_insert_rows(db: Session, document_id: int, rows: List[dict[str, Any]]) -> None:

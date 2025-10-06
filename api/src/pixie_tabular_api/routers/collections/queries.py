@@ -34,9 +34,8 @@ def query_document_rows(
             """
             SELECT d.id AS document_id, d.file_schema
             FROM tabular_collections c
-            JOIN tabular_collection_entries e ON e.collection_id = c.id
-            JOIN tabular_documents d ON d.id = e.document_id
-            WHERE c.name = :collection_name AND e.product_name = :product_name
+            JOIN tabular_documents d ON d.collection_id = c.id
+            WHERE c.name = :collection_name AND d.product_name = :product_name
             """
         ),
         {"collection_name": trimmed_collection, "product_name": trimmed_product},
