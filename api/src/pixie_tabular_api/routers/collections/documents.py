@@ -29,6 +29,7 @@ router = APIRouter()
 
 @dataclass(slots=True)
 class PreparedDocument:
+    """Normalized document payload ready for database insertion."""
     file_name: str
     file_hash: str
     product_name: str
@@ -56,6 +57,7 @@ def add_document(
     ),
     attribute_ranker_llm: AttributeRankerLLM = Depends(get_attribute_ranker_llm),
 ) -> List[Document]:
+    """Store the uploaded file as one or more documents and return their metadata."""
     collection = _normalize_collection_name(collection_name)
     collection_id = _get_collection_id(db, collection)
 
@@ -82,6 +84,7 @@ def add_document(
 
 
 def _normalize_collection_name(collection_name: str) -> str:
+    """Trim whitespace and ensure a collection name is present."""
     trimmed_name = collection_name.strip()
     if not trimmed_name:
         raise HTTPException(status_code=400, detail="Collection name is required")
@@ -89,6 +92,7 @@ def _normalize_collection_name(collection_name: str) -> str:
 
 
 def _get_collection_id(db: Session, collection_name: str) -> int:
+    """Fetch the collection identifier or raise when the collection is unknown."""
     collection_row = db.execute(
         text("SELECT id FROM tabular_collections WHERE name = :name"),
         {"name": collection_name},
@@ -99,6 +103,7 @@ def _get_collection_id(db: Session, collection_name: str) -> int:
 
 
 def _read_uploaded_file(file: UploadFile) -> tuple[str, bytes]:
+    """Read the in-memory upload and enforce non-empty content."""
     file.file.seek(0)
     content = file.file.read()
     if not content:
@@ -108,6 +113,7 @@ def _read_uploaded_file(file: UploadFile) -> tuple[str, bytes]:
 
 
 def _parse_uploaded_documents(file_name: str, content: bytes) -> List[ParsedDocument]:
+    """Convert binary file content into parsed document structures."""
     try:
         return parse_document(file_name, content)
     except EmptyDocumentError as exc:
@@ -129,6 +135,7 @@ def _prepare_documents(
     attribute_describer_llm: AttributeDescriberLLM,
     attribute_ranker_llm: AttributeRankerLLM,
 ) -> List[PreparedDocument]:
+    """Assemble per-document metadata, including schema inference and LLM output."""
     base_hash = sha256(file_content).hexdigest()
     multi_sheet = len(parsed_documents) > 1
     seen_products: set[str] = set()
@@ -199,6 +206,7 @@ def _prepare_documents(
 def _resolve_product_name(
     product_prefix: str | None, default_name: str, index: int
 ) -> str:
+    """Derive the product name for the current sheet using the provided prefix."""
     if product_prefix and product_prefix.strip():
         return f"{product_prefix.strip()} {index}"
     return default_name
@@ -211,6 +219,7 @@ def _store_documents(
     collection_name: str,
     prepared_documents: List[PreparedDocument],
 ) -> List[Document]:
+    """Persist prepared documents and return the API response payload."""
     documents_response: List[Document] = []
 
     try:
@@ -437,6 +446,7 @@ def delete_document(
         raise
 
 def _ensure_json_dict(value: Any) -> Dict[str, Any]:
+    """Best-effort conversion from JSONB/str payload to a dictionary."""
     if value is None:
         return {}
     if isinstance(value, dict):
@@ -452,6 +462,7 @@ def _ensure_json_dict(value: Any) -> Dict[str, Any]:
 
 
 def _bulk_insert_rows(db: Session, document_id: int, rows: List[dict[str, Any]]) -> None:
+    """Insert document rows in a single statement for efficiency."""
     if not rows:
         return
 
