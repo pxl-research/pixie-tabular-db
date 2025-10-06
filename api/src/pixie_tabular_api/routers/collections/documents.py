@@ -1,7 +1,7 @@
 import json
 import logging
 from hashlib import sha256
-from typing import List
+from typing import Any, List
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -26,7 +26,7 @@ router = APIRouter()
 
 
 @router.post("/", response_model=Document, status_code=201)
-async def add_document(
+def add_document(
     collection_name: str,
     file: UploadFile = File(...),
     product_name: str = Form(...),
@@ -53,7 +53,8 @@ async def add_document(
     if not trimmed_product:
         raise HTTPException(status_code=400, detail="Product name is required")
 
-    content = await file.read()
+    file.file.seek(0)
+    content = file.file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
@@ -119,16 +120,7 @@ async def add_document(
         raise HTTPException(status_code=409, detail="Document already exists") from exc
 
     try:
-        for row in parsed.rows:
-            db.execute(
-                text(
-                    "INSERT INTO tabular_rows (file_id, attributes) VALUES (:file_id, :attributes)"
-                ),
-                {
-                    "file_id": document_id,
-                    "attributes": json.dumps(row, default=_json_default),
-                },
-            )
+        _bulk_insert_rows(db, document_id, parsed.rows)
 
         db.execute(
             text(
@@ -257,6 +249,24 @@ def delete_document(
         raise
 
     return None
+
+
+def _bulk_insert_rows(db: Session, document_id: int, rows: List[dict[str, Any]]) -> None:
+    if not rows:
+        return
+
+    insert_stmt = text(
+        "INSERT INTO tabular_rows (file_id, attributes) VALUES (:file_id, :attributes)"
+    )
+    parameters = [
+        {
+            "file_id": document_id,
+            "attributes": json.dumps(row, default=_json_default),
+        }
+        for row in rows
+    ]
+
+    db.execute(insert_stmt, parameters)
 
 
 def _infer_schema(df: pd.DataFrame, columns: List[str]) -> dict[str, str]:
