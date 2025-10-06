@@ -25,7 +25,7 @@ from .dependencies import get_attribute_describer_llm, get_attribute_ranker_llm
 router = APIRouter()
 
 
-@router.post("", response_model=Document, status_code=201)
+@router.post("/", response_model=Document, status_code=201)
 async def add_document(
     collection_name: str,
     file: UploadFile = File(...),

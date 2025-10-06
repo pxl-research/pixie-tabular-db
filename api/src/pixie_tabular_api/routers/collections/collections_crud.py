@@ -10,7 +10,7 @@ from ...schemas import Collection, CollectionCreate
 router = APIRouter()
 
 
-@router.post("", response_model=Collection, status_code=201)
+@router.post("/", response_model=Collection, status_code=201)
 def create_collection(
     payload: CollectionCreate, db: Session = Depends(get_db)
 ) -> Collection:
@@ -37,7 +37,7 @@ def create_collection(
         raise
 
 
-@router.get("", response_model=List[Collection])
+@router.get("/", response_model=List[Collection])
 def list_collections(db: Session = Depends(get_db)) -> List[Collection]:
     res = db.execute(text("SELECT id, name FROM tabular_collections ORDER BY name ASC"))
     return [Collection(id=row.id, name=row.name) for row in res.fetchall()]
