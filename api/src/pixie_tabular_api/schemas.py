@@ -24,12 +24,6 @@ class Document(BaseModel):
     attribute_descriptions: Dict[str, Dict[str, Any]] | None = None
 
 
-class Product(BaseModel):
-    id: int
-    name: str
-    collection: str
-
-
 class AttributeExactFilter(BaseModel):
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     type: Literal["exact"]
@@ -74,7 +68,6 @@ __all__ = [
     "Collection",
     "CollectionCreate",
     "Document",
-    "Product",
     "AttributeExactFilter",
     "AttributeRangeFilter",
     "AttributeFilter",

@@ -173,29 +173,6 @@ async def add_document(
         attribute_descriptions = {}
 
     try:
-        product_insert = db.execute(
-            text(
-                """
-                INSERT INTO tabular_products (collection_id, name)
-                VALUES (:collection_id, :name)
-                ON CONFLICT (collection_id, name) DO NOTHING
-                RETURNING id
-                """
-            ),
-            {"collection_id": collection_row.id, "name": trimmed_product},
-        )
-        product_id = product_insert.scalar_one_or_none()
-        if product_id is None:
-            product_id = db.execute(
-                text(
-                    """
-                    SELECT id FROM tabular_products
-                    WHERE collection_id = :collection_id AND name = :name
-                    """
-                ),
-                {"collection_id": collection_row.id, "name": trimmed_product},
-            ).scalar_one()
-
         document_id = db.execute(
             text(
                 """
@@ -243,13 +220,13 @@ async def add_document(
         db.execute(
             text(
                 """
-                INSERT INTO tabular_collection_entries (collection_id, product_id, file_name, document_id)
-                VALUES (:collection_id, :product_id, :file_name, :document_id)
+                INSERT INTO tabular_collection_entries (collection_id, product_name, file_name, document_id)
+                VALUES (:collection_id, :product_name, :file_name, :document_id)
                 """
             ),
             {
                 "collection_id": collection_row.id,
-                "product_id": product_id,
+                "product_name": trimmed_product,
                 "file_name": file_name,
                 "document_id": document_id,
             },
@@ -257,9 +234,13 @@ async def add_document(
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(
-            status_code=409, detail="Document already registered for collection"
-        ) from exc
+        msg = str(exc).lower()
+        if "tabular_collection_entries" in msg:
+            raise HTTPException(
+                status_code=409,
+                detail="Product already has a document in this collection",
+            ) from exc
+        raise
     except Exception:
         db.rollback()
         raise
@@ -297,27 +278,18 @@ def delete_document(
     if collection_row is None:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    product_param = None
-    trimmed_product = product_name.strip() if product_name is not None else None
+    target_product: str | None = None
 
-    if trimmed_product:
-        product_row = db.execute(
-            text(
-                """
-                SELECT id FROM tabular_products
-                WHERE collection_id = :collection_id AND name = :product_name
-                """
-            ),
-            {"collection_id": collection_row.id, "product_name": trimmed_product},
-        ).fetchone()
-        if product_row is None:
-            raise HTTPException(status_code=404, detail="Product not found in collection")
-        product_param = product_row.id
+    if product_name is not None:
+        trimmed_product = product_name.strip()
+        if not trimmed_product:
+            raise HTTPException(status_code=400, detail="Product name cannot be empty")
+        target_product = trimmed_product
     else:
         product_rows = db.execute(
             text(
                 """
-                SELECT product_id FROM tabular_collection_entries
+                SELECT product_name FROM tabular_collection_entries
                 WHERE collection_id = :collection_id AND file_name = :file_name
                 """
             ),
@@ -331,8 +303,7 @@ def delete_document(
                 status_code=409,
                 detail="Multiple products reference this document; specify product_name",
             )
-        product_param = product_rows[0].product_id
-        trimmed_product = None
+        target_product = product_rows[0].product_name
 
     mapping = db.execute(
         text(
@@ -340,14 +311,14 @@ def delete_document(
             DELETE FROM tabular_collection_entries
             WHERE collection_id = :collection_id
                 AND file_name = :file_name
-                AND product_id = :product_id
-            RETURNING document_id, product_id
+                AND product_name = :product_name
+            RETURNING document_id, product_name
             """
         ),
         {
             "collection_id": collection_row.id,
             "file_name": trimmed_document,
-            "product_id": product_param,
+            "product_name": target_product,
         },
     ).fetchone()
 
@@ -367,19 +338,6 @@ def delete_document(
             db.execute(
                 text("DELETE FROM tabular_documents WHERE id = :document_id"),
                 {"document_id": mapping.document_id},
-            )
-
-        product_link = db.execute(
-            text(
-                "SELECT 1 FROM tabular_collection_entries WHERE product_id = :product_id LIMIT 1"
-            ),
-            {"product_id": mapping.product_id},
-        ).fetchone()
-
-        if product_link is None:
-            db.execute(
-                text("DELETE FROM tabular_products WHERE id = :product_id"),
-                {"product_id": mapping.product_id},
             )
 
         db.commit()
@@ -414,10 +372,9 @@ def query_document_rows(
             """
             SELECT d.id AS document_id, d.file_schema
             FROM tabular_collections c
-            JOIN tabular_products p ON p.collection_id = c.id
-            JOIN tabular_collection_entries e ON e.collection_id = c.id AND e.product_id = p.id
+            JOIN tabular_collection_entries e ON e.collection_id = c.id
             JOIN tabular_documents d ON d.id = e.document_id
-            WHERE c.name = :collection_name AND p.name = :product_name
+            WHERE c.name = :collection_name AND e.product_name = :product_name
             """
         ),
         {"collection_name": trimmed_collection, "product_name": trimmed_product},
