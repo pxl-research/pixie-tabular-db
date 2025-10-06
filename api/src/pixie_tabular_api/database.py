@@ -1,21 +1,15 @@
 from __future__ import annotations
 
-import os
 from typing import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from .config import get_settings
 
-DB_USER = os.getenv("POSTGRES_USER", "pixie")
-DB_PASS = os.getenv("POSTGRES_PASSWORD", "devpassword")
-DB_NAME = os.getenv("POSTGRES_DB", "pixie_tabular")
-DB_HOST = os.getenv("DB_HOST", "db")
-DB_PORT = int(os.getenv("DB_PORT", "5432"))
+_settings = get_settings()
 
-DATABASE_URL = f"postgresql+psycopg://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-
-engine = create_engine(DATABASE_URL, future=True)
+engine = create_engine(_settings.database_url, future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 

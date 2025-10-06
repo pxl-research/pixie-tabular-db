@@ -1,8 +1,8 @@
 import logging
-import os
 
 from fastapi import FastAPI
 
+from .config import get_settings
 from .routers import collections, health
 from .services import AttributeDescriberLLM, AttributeRankerLLM, AzureOpenAILLM
 
@@ -17,23 +17,18 @@ def create_app() -> FastAPI:
 
 
 def _configure_attribute_describer(app: FastAPI) -> None:
-    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    api_key = os.getenv("AZURE_OPENAI_API_KEY")
-    api_version = os.getenv("AZURE_OPENAI_API_VERSION")
-    deployment = os.getenv("AZURE_OPENAI_MODEL_VERSION")
+    settings = get_settings()
 
-    if not all([endpoint, api_key, api_version, deployment]):
-        logging.warning(
-            "Attribute describer LLM not configured; missing Azure OpenAI settings"
-        )
+    if not settings.azure_llm_configured:
+        logging.warning("Attribute describer LLM not configured; missing Azure OpenAI settings")
         return
 
     try:
         azure_llm = AzureOpenAILLM(
-            endpoint=endpoint,
-            api_key=api_key,
-            api_version=api_version,
-            deployment=deployment,
+            endpoint=settings.azure_openai_endpoint,
+            api_key=settings.azure_openai_api_key,
+            api_version=settings.azure_openai_api_version,
+            deployment=settings.azure_openai_model_version,
         )
         app.state.attribute_describer_llm = AttributeDescriberLLM(azure_llm)
         app.state.attribute_ranker_llm = AttributeRankerLLM(azure_llm)
