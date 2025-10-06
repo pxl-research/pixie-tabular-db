@@ -1,5 +1,6 @@
 import json
 import logging
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, Dict, List
 
@@ -16,6 +17,7 @@ from ...services import (
     AttributeRankerLLM,
     DocumentParseError,
     EmptyDocumentError,
+    ParsedDocument,
     UnsupportedDocumentType,
     describe_attributes,
     parse_document,
@@ -23,6 +25,22 @@ from ...services import (
 from .dependencies import get_attribute_describer_llm, get_attribute_ranker_llm
 
 router = APIRouter()
+
+
+@dataclass(slots=True)
+class PreparedDocument:
+    file_name: str
+    file_hash: str
+    product_name: str
+    language: str | None
+    file_description: str | None
+    columns: List[str]
+    field_types: Dict[str, str]
+    attribute_descriptions: Dict[str, Any]
+    rows: List[dict[str, Any]]
+
+    def schema_payload(self) -> Dict[str, Any]:
+        return {"columns": self.columns, "field_types": self.field_types}
 
 
 @router.post("/", response_model=List[Document], status_code=201)
@@ -38,26 +56,60 @@ def add_document(
     ),
     attribute_ranker_llm: AttributeRankerLLM = Depends(get_attribute_ranker_llm),
 ) -> List[Document]:
+    collection = _normalize_collection_name(collection_name)
+    collection_id = _get_collection_id(db, collection)
+
+    file_name, content = _read_uploaded_file(file)
+    parsed_documents = _parse_uploaded_documents(file_name, content)
+
+    prepared_documents = _prepare_documents(
+        file_name=file_name,
+        file_content=content,
+        parsed_documents=parsed_documents,
+        product_prefix=product_prefix,
+        description=description,
+        language=language,
+        attribute_describer_llm=attribute_describer_llm,
+        attribute_ranker_llm=attribute_ranker_llm,
+    )
+
+    return _store_documents(
+        db=db,
+        collection_id=collection_id,
+        collection_name=collection,
+        prepared_documents=prepared_documents,
+    )
+
+
+def _normalize_collection_name(collection_name: str) -> str:
     trimmed_name = collection_name.strip()
     if not trimmed_name:
         raise HTTPException(status_code=400, detail="Collection name is required")
+    return trimmed_name
 
+
+def _get_collection_id(db: Session, collection_name: str) -> int:
     collection_row = db.execute(
         text("SELECT id FROM tabular_collections WHERE name = :name"),
-        {"name": trimmed_name},
+        {"name": collection_name},
     ).fetchone()
     if collection_row is None:
         raise HTTPException(status_code=404, detail="Collection not found")
+    return collection_row.id
 
+
+def _read_uploaded_file(file: UploadFile) -> tuple[str, bytes]:
     file.file.seek(0)
     content = file.file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
-
     file_name = file.filename or "uploaded_document"
+    return file_name, content
 
+
+def _parse_uploaded_documents(file_name: str, content: bytes) -> List[ParsedDocument]:
     try:
-        parsed_documents = parse_document(file_name, content)
+        return parse_document(file_name, content)
     except EmptyDocumentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UnsupportedDocumentType as exc:
@@ -65,46 +117,50 @@ def add_document(
     except DocumentParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    base_hash = sha256(content).hexdigest()
+
+def _prepare_documents(
+    *,
+    file_name: str,
+    file_content: bytes,
+    parsed_documents: List[ParsedDocument],
+    product_prefix: str | None,
+    description: str | None,
+    language: str | None,
+    attribute_describer_llm: AttributeDescriberLLM,
+    attribute_ranker_llm: AttributeRankerLLM,
+) -> List[PreparedDocument]:
+    base_hash = sha256(file_content).hexdigest()
     multi_sheet = len(parsed_documents) > 1
     seen_products: set[str] = set()
-    prepared_documents: List[dict[str, Any]] = []
+    sheet_description = (
+        description.strip() if description and description.strip() else None
+    )
+
+    prepared_documents: List[PreparedDocument] = []
 
     for index, parsed_document in enumerate(parsed_documents, start=1):
         source_name = getattr(parsed_document, "source_name", None)
         default_name = source_name or f"Sheet {index}"
+        product_name = _resolve_product_name(product_prefix, default_name, index)
 
-        if product_prefix and product_prefix.strip():
-            trimmed_product = f"{product_prefix.strip()} {index}"
-        else:
-            trimmed_product = default_name
-        if not trimmed_product:
+        if not product_name:
+            raise HTTPException(status_code=400, detail="Product name is required")
+        if product_name in seen_products:
             raise HTTPException(
                 status_code=400,
-                detail="Product name is required",
+                detail=f"Duplicate product name '{product_name}' in upload",
             )
-
-        if trimmed_product in seen_products:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Duplicate product name '{trimmed_product}' in upload",
-            )
-        seen_products.add(trimmed_product)
-
-        sheet_description = description.strip() if description and description.strip() else None
+        seen_products.add(product_name)
 
         sheet_hash = (
             base_hash
             if not multi_sheet
-            else sha256(f"{base_hash}:{trimmed_product}".encode("utf-8")).hexdigest()
+            else sha256(f"{base_hash}:{product_name}".encode("utf-8")).hexdigest()
         )
 
         df = pd.DataFrame(parsed_document.rows)
         inferred_schema = _infer_schema(df, parsed_document.columns)
-
-        llm_table_name = (
-            file_name if not multi_sheet else f"{file_name}::{trimmed_product}"
-        )
+        llm_table_name = file_name if not multi_sheet else f"{file_name}::{product_name}"
 
         try:
             attribute_descriptions = describe_attributes(
@@ -118,27 +174,43 @@ def add_document(
         except Exception as exc:  # pragma: no cover - defensive path
             logging.error(
                 "Failed to generate attribute descriptions for product '%s': %s",
-                trimmed_product,
+                product_name,
                 exc,
             )
             attribute_descriptions = {}
 
         prepared_documents.append(
-            {
-                "file_name": file_name,
-                "file_hash": sheet_hash,
-                "product_name": trimmed_product,
-                "language": language,
-                "file_description": sheet_description,
-                "file_schema": {
-                    "columns": parsed_document.columns,
-                    "field_types": inferred_schema,
-                },
-                "attribute_descriptions": attribute_descriptions,
-                "rows": parsed_document.rows,
-            }
+            PreparedDocument(
+                file_name=file_name,
+                file_hash=sheet_hash,
+                product_name=product_name,
+                language=language,
+                file_description=sheet_description,
+                columns=list(parsed_document.columns),
+                field_types=inferred_schema,
+                attribute_descriptions=attribute_descriptions,
+                rows=parsed_document.rows,
+            )
         )
 
+    return prepared_documents
+
+
+def _resolve_product_name(
+    product_prefix: str | None, default_name: str, index: int
+) -> str:
+    if product_prefix and product_prefix.strip():
+        return f"{product_prefix.strip()} {index}"
+    return default_name
+
+
+def _store_documents(
+    *,
+    db: Session,
+    collection_id: int,
+    collection_name: str,
+    prepared_documents: List[PreparedDocument],
+) -> List[Document]:
     documents_response: List[Document] = []
 
     try:
@@ -170,30 +242,30 @@ def add_document(
                     """
                 ),
                 {
-                    "collection_id": collection_row.id,
-                    "product_name": prepared["product_name"],
-                    "file_name": prepared["file_name"],
-                    "file_hash": prepared["file_hash"],
-                    "language": prepared["language"],
-                    "file_description": prepared["file_description"],
-                    "file_schema": json.dumps(prepared["file_schema"]),
+                    "collection_id": collection_id,
+                    "product_name": prepared.product_name,
+                    "file_name": prepared.file_name,
+                    "file_hash": prepared.file_hash,
+                    "language": prepared.language,
+                    "file_description": prepared.file_description,
+                    "file_schema": json.dumps(prepared.schema_payload()),
                     "attribute_descriptions": json.dumps(
-                        prepared["attribute_descriptions"], default=_json_default
+                        prepared.attribute_descriptions, default=_json_default
                     ),
                 },
             ).scalar_one()
 
-            _bulk_insert_rows(db, document_id, prepared["rows"])
+            _bulk_insert_rows(db, document_id, prepared.rows)
 
             documents_response.append(
                 Document(
                     id=document_id,
-                    file_name=prepared["file_name"],
-                    collection=trimmed_name,
-                    product=prepared["product_name"],
-                    row_count=len(prepared["rows"]),
-                    columns=prepared["file_schema"]["columns"],
-                    attribute_descriptions=prepared["attribute_descriptions"],
+                    file_name=prepared.file_name,
+                    collection=collection_name,
+                    product=prepared.product_name,
+                    row_count=len(prepared.rows),
+                    columns=prepared.columns,
+                    attribute_descriptions=prepared.attribute_descriptions,
                 )
             )
 
