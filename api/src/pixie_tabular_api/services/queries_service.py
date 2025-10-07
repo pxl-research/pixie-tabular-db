@@ -1,4 +1,4 @@
-"""Query helpers for tabular document rows."""
+"""Service helpers for querying document rows."""
 
 from __future__ import annotations
 
@@ -11,7 +11,11 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..schemas import AttributeRangeFilter, DocumentQueryRequest, DocumentQueryResponse
-from .document_ingestion import ensure_json_dict, get_collection_id, normalize_collection_name
+from .documents_service import (
+    ensure_json_dict,
+    get_collection_id,
+    normalize_collection_name,
+)
 
 _NUMERIC_REGEX_SQL = "^\\s*-?[0-9]+(?:\\.[0-9]+)?\\s*$"
 

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..schemas import Document
 from ..services import AttributeDescriberLLM, AttributeRankerLLM
-from ..services.document_ingestion import (
+from ..services.documents_service import (
     ensure_json_dict,
     get_collection_id,
     normalize_collection_name,

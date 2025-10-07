@@ -1,4 +1,4 @@
-"""Service helpers for managing tabular collections."""
+"""Service helpers for managing collections."""
 
 from __future__ import annotations
 

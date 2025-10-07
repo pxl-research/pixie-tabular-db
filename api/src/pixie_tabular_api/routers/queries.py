@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..schemas import DocumentQueryRequest, DocumentQueryResponse
-from ..services.document_queries import execute_document_query
+from ..services.queries_service import execute_document_query
 
 router = APIRouter()
 
