@@ -17,7 +17,7 @@ from ..services.documents_service import (
     read_uploaded_file,
     store_documents,
 )
-from .dependencies import get_attribute_describer_llm, get_attribute_ranker_llm
+from .router_dependencies import get_attribute_describer_llm, get_attribute_ranker_llm
 
 router = APIRouter()
 
