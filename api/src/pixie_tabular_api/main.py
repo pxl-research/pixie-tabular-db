@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from .config import get_settings
 from .logging_config import configure_logging
-from .routers import collections, health
+from .routers import collections_router, health
 from .services import AttributeDescriberLLM, AttributeRankerLLM, AzureOpenAILLM
 
 
@@ -12,7 +12,7 @@ def create_app() -> FastAPI:
     configure_logging()
     app = FastAPI(title="Pixie Tabular API", version="0.1.0")
     app.include_router(health.router)
-    app.include_router(collections.router)
+    app.include_router(collections_router.router)
 
     _configure_attribute_describer(app)
     return app

@@ -1,6 +1,6 @@
 from fastapi import HTTPException, Request
 
-from ...services import AttributeDescriberLLM, AttributeRankerLLM
+from ..services import AttributeDescriberLLM, AttributeRankerLLM
 
 
 def get_attribute_describer_llm(request: Request) -> AttributeDescriberLLM:

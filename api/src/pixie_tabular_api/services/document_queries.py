@@ -1,32 +1,35 @@
-from decimal import Decimal, InvalidOperation
-from typing import Any
+"""Query helpers for tabular document rows."""
+
+from __future__ import annotations
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from decimal import Decimal, InvalidOperation
+from typing import Any, Dict
+
+from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from ...database import get_db
-from ...schemas import AttributeRangeFilter, DocumentQueryRequest, DocumentQueryResponse
+from ..schemas import AttributeRangeFilter, DocumentQueryRequest, DocumentQueryResponse
+from .document_ingestion import ensure_json_dict, get_collection_id, normalize_collection_name
 
 _NUMERIC_REGEX_SQL = "^\\s*-?[0-9]+(?:\\.[0-9]+)?\\s*$"
-
-router = APIRouter()
 
 logger = logging.getLogger(__name__)
 
 
-@router.post("/{product_name}/query", response_model=DocumentQueryResponse)
-def query_document_rows(
+def execute_document_query(
+    *,
+    db: Session,
     collection_name: str,
     product_name: str,
-    payload: DocumentQueryRequest,
-    db: Session = Depends(get_db),
+    request: DocumentQueryRequest,
 ) -> DocumentQueryResponse:
-    trimmed_collection = collection_name.strip()
-    trimmed_product = product_name.strip()
+    """Run a filtered row query for a given product within a collection."""
 
-    if not trimmed_collection or not trimmed_product:
+    trimmed_collection = normalize_collection_name(collection_name)
+    trimmed_product = product_name.strip()
+    if not trimmed_product:
         raise HTTPException(
             status_code=400,
             detail="Collection and product names are required",
@@ -36,33 +39,34 @@ def query_document_rows(
         "Querying collection '%s', product '%s' with %d filter(s) (limit=%d, offset=%d)",
         trimmed_collection,
         trimmed_product,
-        len(payload.filters),
-        payload.limit,
-        payload.offset,
+        len(request.filters),
+        request.limit,
+        request.offset,
     )
+
+    collection_id = get_collection_id(db, trimmed_collection)
 
     document_row = db.execute(
         text(
             """
-            SELECT d.id AS document_id, d.file_schema
-            FROM tabular_collections c
-            JOIN tabular_documents d ON d.collection_id = c.id
-            WHERE c.name = :collection_name AND d.product_name = :product_name
+            SELECT id, file_schema
+            FROM tabular_documents
+            WHERE collection_id = :collection_id AND product_name = :product_name
             """
         ),
-        {"collection_name": trimmed_collection, "product_name": trimmed_product},
+        {"collection_id": collection_id, "product_name": trimmed_product},
     ).fetchone()
 
     if document_row is None:
         raise HTTPException(status_code=404, detail="Product not found in collection")
 
-    schema: dict[str, Any] = document_row.file_schema or {}
-    field_types: dict[str, str] = schema.get("field_types", {}) if isinstance(schema, dict) else {}
+    schema: Dict[str, Any] = ensure_json_dict(document_row.file_schema)
+    field_types: Dict[str, str] = schema.get("field_types", {}) if isinstance(schema, dict) else {}
 
     filter_conditions: list[str] = ["file_id = :document_id"]
-    filter_params: dict[str, Any] = {"document_id": document_row.document_id}
+    filter_params: Dict[str, Any] = {"document_id": document_row.id}
 
-    for index, attribute_filter in enumerate(payload.filters):
+    for index, attribute_filter in enumerate(request.filters):
         attribute_name = attribute_filter.name.strip()
         if not attribute_name:
             raise HTTPException(status_code=400, detail="Attribute name cannot be empty")
@@ -81,7 +85,10 @@ def query_document_rows(
             if column_type != "NUMERIC":
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Range filters are only supported for numeric attributes (received '{attribute_name}')",
+                    detail=(
+                        "Range filters are only supported for numeric attributes "
+                        f"(received '{attribute_name}')"
+                    ),
                 )
 
             numeric_expr = _numeric_expression(attr_param)
@@ -138,7 +145,7 @@ def query_document_rows(
         f"SELECT COUNT(*) FROM tabular_rows WHERE {where_clause}"
     )
 
-    rows_params = {**filter_params, "limit": payload.limit, "offset": payload.offset}
+    rows_params = {**filter_params, "limit": request.limit, "offset": request.offset}
 
     rows_result = db.execute(rows_stmt, rows_params).fetchall()
     total_count = db.execute(count_stmt, filter_params).scalar_one()
@@ -148,8 +155,8 @@ def query_document_rows(
         results=[row.attributes for row in rows_result],
         count=len(rows_result),
         total=total_count,
-        limit=payload.limit,
-        offset=payload.offset,
+        limit=request.limit,
+        offset=request.offset,
     )
 
 
@@ -183,7 +190,7 @@ def _parse_decimal(value: Any, attribute_name: str) -> Decimal:
             if not trimmed:
                 raise ValueError
             return Decimal(trimmed)
-    except (InvalidOperation, TypeError, ValueError) as exc:  # pragma: no cover - defensive guarding
+    except (InvalidOperation, TypeError, ValueError) as exc:  # pragma: no cover - defensive path
         raise HTTPException(
             status_code=400,
             detail=f"Invalid numeric value for attribute '{attribute_name}'",
@@ -214,7 +221,4 @@ def _parse_boolean(value: Any, attribute_name: str) -> bool:
     )
 
 
-__all__ = [
-    "query_document_rows",
-    "router",
-]
+__all__ = ["execute_document_query"]

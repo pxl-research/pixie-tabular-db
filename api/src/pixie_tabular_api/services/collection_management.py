@@ -1,22 +1,22 @@
+"""Service helpers for managing tabular collections."""
+
+from __future__ import annotations
+
 import logging
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from ...database import get_db
-from ...schemas import Collection, CollectionCreate
+from ..schemas import Collection, CollectionCreate
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
 
+def create_collection(*, db: Session, payload: CollectionCreate) -> Collection:
+    """Persist a new collection and return its metadata."""
 
-@router.post("/", response_model=Collection, status_code=201)
-def create_collection(
-    payload: CollectionCreate, db: Session = Depends(get_db)
-) -> Collection:
     try:
         res = db.execute(
             text(
@@ -45,17 +45,20 @@ def create_collection(
         raise
 
 
-@router.get("/", response_model=List[Collection])
-def list_collections(db: Session = Depends(get_db)) -> List[Collection]:
+def list_collections(*, db: Session) -> List[Collection]:
+    """Fetch all collections ordered by name."""
+
     res = db.execute(text("SELECT id, name FROM tabular_collections ORDER BY name ASC"))
     return [Collection(id=row.id, name=row.name) for row in res.fetchall()]
 
 
-@router.delete("/{collection_name}", status_code=204)
-def delete_collection(collection_name: str, db: Session = Depends(get_db)) -> None:
+def delete_collection(*, db: Session, collection_name: str) -> None:
+    """Delete the given collection by name."""
+
     trimmed_name = collection_name.strip()
     if not trimmed_name:
         raise HTTPException(status_code=400, detail="Collection name is required")
+
     res = db.execute(
         text("DELETE FROM tabular_collections WHERE name = :name RETURNING id"),
         {"name": trimmed_name},
@@ -64,14 +67,13 @@ def delete_collection(collection_name: str, db: Session = Depends(get_db)) -> No
     if not row:
         db.rollback()
         raise HTTPException(status_code=404, detail="Collection not found")
+
     db.commit()
     logger.info("Deleted collection '%s' (id=%s)", trimmed_name, row.id)
-    return None
 
 
 __all__ = [
     "create_collection",
-    "list_collections",
     "delete_collection",
-    "router",
+    "list_collections",
 ]

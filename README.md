@@ -49,6 +49,6 @@ Wanneer Azure OpenAI-variabelen ontbreken, slaat de API enkel de ruwe schema- en
 
 ## Handige referenties
 
-- `api/src/pixie_tabular_api/routers/collections/documents.py` – stap-voor-stap verwerking van uploads.
+- `api/src/pixie_tabular_api/routers/documents.py` – stap-voor-stap verwerking van uploads.
 - `db/init.sql` – schema van de PostgreSQL-tabellen.
 - `infra/docker/docker-compose.dev.yml` – voorbeeldconfiguratie voor lokale ontwikkeling.

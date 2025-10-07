@@ -1,6 +1,6 @@
-from . import collections, health
+from . import collections_router, health
 
 __all__ = [
-    "collections",
+    "collections_router",
     "health",
 ]
