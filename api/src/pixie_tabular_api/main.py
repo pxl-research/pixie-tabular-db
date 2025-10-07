@@ -22,7 +22,9 @@ def _configure_attribute_describer(app: FastAPI) -> None:
     settings = get_settings()
 
     if not settings.azure_llm_configured:
-        logging.warning("Attribute describer LLM not configured; missing Azure OpenAI settings")
+        logging.warning(
+            "Attribute describer LLM not configured; missing Azure OpenAI settings"
+        )
         return
 
     try:

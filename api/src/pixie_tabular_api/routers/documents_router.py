@@ -17,7 +17,10 @@ from ..services.documents_service import (
     read_uploaded_file,
     store_documents,
 )
-from .llm_dependency_providers import get_attribute_describer_llm, get_attribute_ranker_llm
+from .llm_dependency_providers import (
+    get_attribute_describer_llm,
+    get_attribute_ranker_llm,
+)
 
 router = APIRouter()
 
@@ -146,7 +149,9 @@ def delete_document(
     trimmed_identifier = identifier.strip()
 
     if not trimmed_identifier:
-        raise HTTPException(status_code=400, detail="Collection and identifier are required")
+        raise HTTPException(
+            status_code=400, detail="Collection and identifier are required"
+        )
 
     collection_row = db.execute(
         text("SELECT id FROM tabular_collections WHERE name = :name"),
