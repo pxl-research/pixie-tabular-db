@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends
 
 from ..security import require_api_key
-from . import health
-from .collections import router as collections_router
-from .documents import router as documents_router
-from .queries import router as queries_router
+from .health_router import router as health_router
+from .collections_router import router as collections_router
+from .documents_router import router as documents_router
+from .queries_router import router as queries_router
 
 collections_api = APIRouter(
     prefix="/collections",
@@ -18,5 +18,5 @@ collections_api.include_router(queries_router, prefix="/{collection_name}/produc
 
 __all__ = [
     "collections_api",
-    "health",
+    "health_router",
 ]
