@@ -46,3 +46,8 @@ services:
 
 volumes:
   pgdata:
+
+networks:
+  default:
+    external: true
+    name: pixie-network
