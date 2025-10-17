@@ -30,7 +30,7 @@ def create_collection(*, db: Session, payload: CollectionCreate) -> Collection:
             raise HTTPException(status_code=500, detail="Failed to create collection")
         db.commit()
         logger.info("Created collection '%s' (id=%s)", row.name, row.id)
-        return Collection(id=row.id, name=row.name)
+        return Collection(id=row.id, name=row.name, document_count=0)
     except Exception as exc:  # pragma: no cover - bubble-up unknown database errors
         db.rollback()
         msg = str(exc).lower()
@@ -48,8 +48,28 @@ def create_collection(*, db: Session, payload: CollectionCreate) -> Collection:
 def list_collections(*, db: Session) -> List[Collection]:
     """Fetch all collections ordered by name."""
 
-    res = db.execute(text("SELECT id, name FROM tabular_collections ORDER BY name ASC"))
-    return [Collection(id=row.id, name=row.name) for row in res.fetchall()]
+    res = db.execute(
+        text(
+            """
+            SELECT
+                c.id,
+                c.name,
+                COUNT(d.id) AS document_count
+            FROM tabular_collections c
+            LEFT JOIN tabular_documents d ON d.collection_id = c.id
+            GROUP BY c.id, c.name
+            ORDER BY c.name ASC
+            """
+        )
+    )
+    return [
+        Collection(
+            id=row.id,
+            name=row.name,
+            document_count=int(row.document_count),
+        )
+        for row in res.fetchall()
+    ]
 
 
 def delete_collection(*, db: Session, collection_name: str) -> None:

@@ -364,6 +364,8 @@ def store_documents(
                     "row_count": len(prepared.rows),
                     "columns": prepared.columns,
                     "attribute_descriptions": prepared.attribute_descriptions,
+                    "language": prepared.language,
+                    "description": prepared.file_description,
                 }
             )
 

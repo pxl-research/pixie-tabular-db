@@ -12,6 +12,7 @@ class CollectionCreate(BaseModel):
 class Collection(BaseModel):
     id: int
     name: str
+    document_count: int
 
 
 class Document(BaseModel):
@@ -22,6 +23,22 @@ class Document(BaseModel):
     row_count: int
     columns: List[str]
     attribute_descriptions: Dict[str, Dict[str, Any]] | None = None
+    language: str | None = None
+    description: str | None = None
+
+
+class DocumentUpdate(BaseModel):
+    product: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] | None = None
+    description: str | None = None
+    language: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] | None = None
+
+    @model_validator(mode="after")
+    def validate_fields(self) -> "DocumentUpdate":
+        if not self.model_fields_set:
+            raise ValueError("At least one field must be provided")
+        if "product" in self.model_fields_set and self.product is None:
+            raise ValueError("product may not be null")
+        return self
 
 
 class AttributeExactFilter(BaseModel):
@@ -68,6 +85,7 @@ __all__ = [
     "Collection",
     "CollectionCreate",
     "Document",
+    "DocumentUpdate",
     "AttributeExactFilter",
     "AttributeRangeFilter",
     "AttributeFilter",
