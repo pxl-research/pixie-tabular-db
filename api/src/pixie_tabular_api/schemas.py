@@ -31,6 +31,7 @@ class DocumentUpdate(BaseModel):
     product: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] | None = None
     description: str | None = None
     language: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] | None = None
+    attribute_ranks: Dict[str, Annotated[int, Field(ge=1)]] | None = None
 
     @model_validator(mode="after")
     def validate_fields(self) -> "DocumentUpdate":
@@ -38,6 +39,9 @@ class DocumentUpdate(BaseModel):
             raise ValueError("At least one field must be provided")
         if "product" in self.model_fields_set and self.product is None:
             raise ValueError("product may not be null")
+        if "attribute_ranks" in self.model_fields_set:
+            if not self.attribute_ranks:
+                raise ValueError("attribute_ranks may not be empty")
         return self
 
 

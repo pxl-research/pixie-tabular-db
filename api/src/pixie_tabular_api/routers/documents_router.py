@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import List
 
@@ -155,8 +156,7 @@ def update_document(
     collection_id = get_collection_id(db, trimmed_collection)
 
     update_payload = payload.model_dump(exclude_unset=True)
-    if not update_payload:
-        raise HTTPException(status_code=400, detail="At least one field must be provided")
+    rank_updates = update_payload.pop("attribute_ranks", None)
 
     column_map = {
         "product": "product_name",
@@ -177,31 +177,70 @@ def update_document(
         set_clauses.append(f"{column_name} = :{param_name}")
         parameters[param_name] = value
 
-    if not set_clauses:
-        raise HTTPException(status_code=400, detail="No valid fields to update")
-
-    update_stmt = text(
-        f"""
-        UPDATE tabular_documents
-        SET {', '.join(set_clauses)}
-        WHERE id = :document_id AND collection_id = :collection_id
-        RETURNING
-            id,
-            file_name,
-            product_name,
-            language,
-            file_description,
-            file_schema,
-            attribute_descriptions,
-            (
-                SELECT COUNT(*)
-                FROM tabular_rows r
-                WHERE r.file_id = tabular_documents.id
-            ) AS row_count
-        """
-    )
-
     try:
+        if rank_updates:
+            current_row = db.execute(
+                text(
+                    """
+                    SELECT attribute_descriptions
+                    FROM tabular_documents
+                    WHERE id = :document_id AND collection_id = :collection_id
+                    FOR UPDATE
+                    """
+                ),
+                {
+                    "document_id": document_id,
+                    "collection_id": collection_id,
+                },
+            ).fetchone()
+            if current_row is None:
+                raise HTTPException(
+                    status_code=404, detail="Document not found in collection"
+                )
+
+            attribute_descriptions = ensure_json_dict(current_row.attribute_descriptions)
+            if not attribute_descriptions:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Document has no attribute descriptions to update",
+                )
+
+            for attribute_name, rank in rank_updates.items():
+                details = attribute_descriptions.get(attribute_name)
+                if not isinstance(details, dict):
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Attribute '{attribute_name}' not found in document",
+                    )
+                details["rank"] = rank
+
+            parameters["attribute_descriptions"] = json.dumps(attribute_descriptions)
+            set_clauses.append("attribute_descriptions = :attribute_descriptions")
+
+        if not set_clauses:
+            raise HTTPException(status_code=400, detail="No valid fields to update")
+
+        update_stmt = text(
+            f"""
+            UPDATE tabular_documents
+            SET {', '.join(set_clauses)}
+            WHERE id = :document_id AND collection_id = :collection_id
+            RETURNING
+                id,
+                file_name,
+                product_name,
+                language,
+                file_description,
+                file_schema,
+                attribute_descriptions,
+                (
+                    SELECT COUNT(*)
+                    FROM tabular_rows r
+                    WHERE r.file_id = tabular_documents.id
+                ) AS row_count
+            """
+        )
+
         row = db.execute(update_stmt, parameters).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="Document not found in collection")
