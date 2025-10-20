@@ -30,28 +30,50 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Determine image name
+      - name: Determine image names
         id: image
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           repo_name="${GITHUB_REPOSITORY#*/}"
-          image="${owner}/${repo_name}"
-          echo "name=${image}" >> "$GITHUB_OUTPUT"
+          api_image="${owner}/${repo_name}"
+          db_image="${api_image}-db"
+          {
+            echo "api_name=${api_image}"
+            echo "db_name=${db_image}"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Extract Docker metadata
-        id: meta
+      - name: Extract API Docker metadata
+        id: meta_api
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.api_name }}
           tags: |
             type=ref,event=branch
             type=sha
 
-      - name: Build and push Docker image
+      - name: Extract DB Docker metadata
+        id: meta_db
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.db_name }}
+          tags: |
+            type=ref,event=branch
+            type=sha
+
+      - name: Build and push API Docker image
         uses: docker/build-push-action@v6
         with:
           context: ./api
           file: ./api/Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta_api.outputs.tags }}
+          labels: ${{ steps.meta_api.outputs.labels }}
+
+      - name: Build and push DB Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./db
+          file: ./db/Dockerfile
+          push: true
+          tags: ${{ steps.meta_db.outputs.tags }}
+          labels: ${{ steps.meta_db.outputs.labels }}
