@@ -35,8 +35,12 @@ jobs:
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           repo_name="${GITHUB_REPOSITORY#*/}"
-          api_image="${owner}/${repo_name}"
-          db_image="${api_image}-db"
+          base_name="${repo_name%-db}"
+          if [ -z "$base_name" ]; then
+            base_name="${repo_name}"
+          fi
+          api_image="${owner}/${base_name}-api"
+          db_image="${owner}/${base_name}-db"
           {
             echo "api_name=${api_image}"
             echo "db_name=${db_image}"
