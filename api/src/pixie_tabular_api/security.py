@@ -12,6 +12,11 @@ _API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 def require_api_key(api_key: str | None = Depends(_API_KEY_HEADER)) -> None:
+    """
+    Validate the API key from request headers.
+
+    Raises HTTPException if API key is missing, invalid, or not configured.
+    """
     expected_api_key = get_settings().pixie_api_key
 
     if expected_api_key is None:

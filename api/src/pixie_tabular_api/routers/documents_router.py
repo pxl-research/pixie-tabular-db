@@ -11,7 +11,7 @@ from ..database import get_db
 from ..schemas import Document, DocumentUpdate
 from ..services import AttributeDescriberLLM, AttributeRankerLLM
 from ..services.documents_service import (
-    ensure_json_dict,
+    normalize_to_dict,
     get_collection_id,
     normalize_collection_name,
     parse_uploaded_documents,
@@ -66,7 +66,7 @@ def add_document(
         attribute_ranker_llm=attribute_ranker_llm,
     )
 
-    stored_payloads = store_documents(
+    stored_results = store_documents(
         db=db,
         collection_id=collection_id,
         collection_name=collection,
@@ -74,12 +74,12 @@ def add_document(
     )
     logger.info(
         "Stored %d document(s) from upload '%s' in collection '%s'",
-        len(stored_payloads),
+        len(stored_results),
         file_name,
         collection,
     )
 
-    return [Document(**payload) for payload in stored_payloads]
+    return [Document(**db_result) for db_result in stored_results]
 
 
 @router.get("/", response_model=List[Document])
@@ -116,8 +116,8 @@ def list_documents(
 
     documents: List[Document] = []
     for row in rows:
-        file_schema = ensure_json_dict(row.file_schema)
-        attribute_descriptions = ensure_json_dict(row.attribute_descriptions)
+        file_schema = normalize_to_dict(row.file_schema)
+        attribute_descriptions = normalize_to_dict(row.attribute_descriptions)
         columns = file_schema.get("columns")
         if not isinstance(columns, list):
             columns = []
@@ -149,14 +149,14 @@ def list_documents(
 def update_document(
     collection_name: str,
     document_id: int,
-    payload: DocumentUpdate,
+    update_request: DocumentUpdate,
     db: Session = Depends(get_db),
 ) -> Document:
     trimmed_collection = normalize_collection_name(collection_name)
     collection_id = get_collection_id(db, trimmed_collection)
 
-    update_payload = payload.model_dump(exclude_unset=True)
-    rank_updates = update_payload.pop("attribute_ranks", None)
+    update_data = update_request.model_dump(exclude_unset=True)
+    rank_updates = update_data.pop("attribute_ranks", None)
 
     column_map = {
         "product": "product_name",
@@ -169,7 +169,7 @@ def update_document(
         "collection_id": collection_id,
     }
 
-    for field_name, value in update_payload.items():
+    for field_name, value in update_data.items():
         column_name = column_map.get(field_name)
         if column_name is None:
             continue
@@ -198,7 +198,9 @@ def update_document(
                     status_code=404, detail="Document not found in collection"
                 )
 
-            attribute_descriptions = ensure_json_dict(current_row.attribute_descriptions)
+            attribute_descriptions = normalize_to_dict(
+                current_row.attribute_descriptions
+            )
             if not attribute_descriptions:
                 raise HTTPException(
                     status_code=400,
@@ -243,7 +245,9 @@ def update_document(
 
         row = db.execute(update_stmt, parameters).fetchone()
         if row is None:
-            raise HTTPException(status_code=404, detail="Document not found in collection")
+            raise HTTPException(
+                status_code=404, detail="Document not found in collection"
+            )
         db.commit()
     except HTTPException:
         db.rollback()
@@ -251,7 +255,11 @@ def update_document(
     except IntegrityError as exc:
         db.rollback()
         msg = str(exc).lower()
-        if "tabular_documents" in msg or "collection_id" in msg or "product_name" in msg:
+        if (
+            "tabular_documents" in msg
+            or "collection_id" in msg
+            or "product_name" in msg
+        ):
             raise HTTPException(
                 status_code=409,
                 detail="Product already has a document in this collection",
@@ -261,8 +269,8 @@ def update_document(
         db.rollback()
         raise
 
-    file_schema = ensure_json_dict(row.file_schema)
-    attribute_descriptions = ensure_json_dict(row.attribute_descriptions)
+    file_schema = normalize_to_dict(row.file_schema)
+    attribute_descriptions = normalize_to_dict(row.attribute_descriptions)
     columns = file_schema.get("columns")
     if not isinstance(columns, list):
         columns = []

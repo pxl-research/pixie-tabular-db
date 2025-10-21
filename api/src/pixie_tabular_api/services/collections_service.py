@@ -14,7 +14,7 @@ from ..schemas import Collection, CollectionCreate
 logger = logging.getLogger(__name__)
 
 
-def create_collection(*, db: Session, payload: CollectionCreate) -> Collection:
+def create_collection(*, db: Session, create_request: CollectionCreate) -> Collection:
     """Persist a new collection and return its metadata."""
 
     try:
@@ -22,7 +22,7 @@ def create_collection(*, db: Session, payload: CollectionCreate) -> Collection:
             text(
                 "INSERT INTO tabular_collections (name) VALUES (:name) RETURNING id, name"
             ),
-            {"name": payload.name},
+            {"name": create_request.name},
         )
         row = res.fetchone()
         if row is None:
@@ -40,7 +40,7 @@ def create_collection(*, db: Session, payload: CollectionCreate) -> Collection:
             ) from exc
         logger.exception(
             "Unexpected database error while creating collection '%s'",
-            payload.name,
+            create_request.name,
         )
         raise
 

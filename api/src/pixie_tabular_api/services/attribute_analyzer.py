@@ -4,6 +4,10 @@ from typing import Any
 
 import pandas as pd
 
+# Column names that should always be treated as plain text,
+# regardless of their statistical properties
+TEXT_ONLY_COLUMNS = frozenset(["barcode", "naam", "beschrijving"])
+
 
 def analyze_attribute(
     column_name: str, df: pd.DataFrame, datatype: str
@@ -23,7 +27,7 @@ def analyze_attribute(
         return {"type": "text"}
 
     # Special cases for text fields
-    if column_name in ["barcode", "naam", "beschrijving"]:
+    if column_name in TEXT_ONLY_COLUMNS:
         return {"type": "text"}
 
     if datatype == "BOOLEAN":

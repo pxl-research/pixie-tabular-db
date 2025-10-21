@@ -14,6 +14,7 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, futu
 
 
 def get_db() -> Generator[Session, None, None]:
+    """Provide a database session for dependency injection."""
     db = SessionLocal()
     try:
         yield db

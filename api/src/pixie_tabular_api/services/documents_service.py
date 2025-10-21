@@ -15,7 +15,7 @@ from fastapi import HTTPException, UploadFile
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, DatabaseError
 from sqlalchemy.orm import Session
 
 from .attribute_describer import describe_attributes
@@ -36,6 +36,10 @@ class EmptyDocumentError(DocumentParseError):
     """Raised when the uploaded document does not contain data rows."""
 
 
+class DocumentStorageError(Exception):
+    """Raised when document storage fails due to database issues."""
+
+
 @dataclass(slots=True)
 class ParsedDocument:
     source_name: str
@@ -51,7 +55,9 @@ def parse_document(file_name: str, content: bytes) -> List[ParsedDocument]:
         return [_parse_csv(file_name, content)]
     if lowered.endswith(".xlsx"):
         return _parse_xlsx(content)
-    raise UnsupportedDocumentType("Only .csv and .xlsx files are supported at this stage")
+    raise UnsupportedDocumentType(
+        "Only .csv and .xlsx files are supported at this stage"
+    )
 
 
 def _parse_csv(file_name: str, content: bytes) -> ParsedDocument:
@@ -123,7 +129,9 @@ def _parse_xlsx(content: bytes) -> List[ParsedDocument]:
             for row in rows_iter:
                 row_dict = {
                     columns[pos]: (
-                        row[column_indexes[pos]] if column_indexes[pos] < len(row) else None
+                        row[column_indexes[pos]]
+                        if column_indexes[pos] < len(row)
+                        else None
                     )
                     for pos in range(len(columns))
                 }
@@ -254,7 +262,9 @@ def prepare_documents(
 
         df = pd.DataFrame(parsed_document.rows)
         inferred_schema = infer_schema(df, list(parsed_document.columns))
-        llm_table_name = file_name if not multi_sheet else f"{file_name}::{product_name}"
+        llm_table_name = (
+            file_name if not multi_sheet else f"{file_name}::{product_name}"
+        )
 
         try:
             attribute_descriptions = describe_attributes(
@@ -391,18 +401,29 @@ def store_documents(
     except HTTPException:
         db.rollback()
         raise
-    except Exception:
+    except DatabaseError as exc:
+        db.rollback()
+        logger.exception(
+            "Database error while storing document(s) for collection '%s'",
+            collection_name,
+        )
+        raise DocumentStorageError(
+            f"Failed to store documents due to database error: {exc}"
+        ) from exc
+    except Exception as exc:
         db.rollback()
         logger.exception(
             "Unexpected error while storing document(s) for collection '%s'",
             collection_name,
         )
-        raise
+        raise DocumentStorageError(f"Failed to store documents: {exc}") from exc
 
     return stored_documents
 
 
-def bulk_insert_rows(db: Session, document_id: int, rows: Sequence[dict[str, Any]]) -> None:
+def bulk_insert_rows(
+    db: Session, document_id: int, rows: Sequence[dict[str, Any]]
+) -> None:
     """Insert document rows in a single statement for efficiency."""
 
     if not rows:
@@ -422,7 +443,7 @@ def bulk_insert_rows(db: Session, document_id: int, rows: Sequence[dict[str, Any
     db.execute(insert_stmt, parameters)
 
 
-def ensure_json_dict(value: Any) -> Dict[str, Any]:
+def normalize_to_dict(value: Any) -> Dict[str, Any]:
     """Best-effort conversion from JSONB/str payload to a dictionary."""
 
     if value is None:
@@ -469,12 +490,13 @@ def json_default(value: Any):
 
 __all__ = [
     "DocumentParseError",
+    "DocumentStorageError",
     "EmptyDocumentError",
     "ParsedDocument",
     "PreparedDocument",
     "UnsupportedDocumentType",
     "bulk_insert_rows",
-    "ensure_json_dict",
+    "normalize_to_dict",
     "get_collection_id",
     "infer_schema",
     "json_default",

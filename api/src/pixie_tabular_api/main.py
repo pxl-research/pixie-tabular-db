@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from .config import get_settings
 from .logging_config import configure_logging
-from .routers import collections_api, health_router
+from .routers import collections_main_router, health_router
 from .services import AttributeDescriberLLM, AttributeRankerLLM, AzureOpenAILLM
 
 
@@ -12,7 +12,7 @@ def create_app() -> FastAPI:
     configure_logging()
     app = FastAPI(title="Pixie Tabular API", version="0.1.0")
     app.include_router(health_router)
-    app.include_router(collections_api)
+    app.include_router(collections_main_router)
 
     _configure_attribute_describer(app)
     return app
@@ -26,6 +26,12 @@ def _configure_attribute_describer(app: FastAPI) -> None:
             "Attribute describer LLM not configured; missing Azure OpenAI settings"
         )
         return
+
+    # After azure_llm_configured check, we know these values are not None
+    assert settings.azure_openai_endpoint is not None
+    assert settings.azure_openai_api_key is not None
+    assert settings.azure_openai_api_version is not None
+    assert settings.azure_openai_model_version is not None
 
     try:
         azure_llm = AzureOpenAILLM(

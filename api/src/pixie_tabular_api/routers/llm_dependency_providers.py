@@ -4,6 +4,7 @@ from ..services import AttributeDescriberLLM, AttributeRankerLLM
 
 
 def get_attribute_describer_llm(request: Request) -> AttributeDescriberLLM:
+    """Retrieve the attribute describer LLM from application state."""
     llm = getattr(request.app.state, "attribute_describer_llm", None)
     if llm is None:
         raise HTTPException(
@@ -13,6 +14,7 @@ def get_attribute_describer_llm(request: Request) -> AttributeDescriberLLM:
 
 
 def get_attribute_ranker_llm(request: Request) -> AttributeRankerLLM:
+    """Retrieve the attribute ranker LLM from application state."""
     llm = getattr(request.app.state, "attribute_ranker_llm", None)
     if llm is None:
         raise HTTPException(

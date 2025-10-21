@@ -61,5 +61,5 @@ class AttributeDescriberLLM:
                 )
             return content
         except Exception as e:
-            logging.error(f"Error: {str(e)}")
+            logging.error("Error generating attribute description: %s", str(e))
         return None

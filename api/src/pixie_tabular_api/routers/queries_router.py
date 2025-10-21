@@ -12,14 +12,19 @@ router = APIRouter()
 def query_document_rows(
     collection_name: str,
     product_name: str,
-    payload: DocumentQueryRequest,
+    query_request: DocumentQueryRequest,
     db: Session = Depends(get_db),
 ) -> DocumentQueryResponse:
+    """
+    Query document rows for a specific product with optional filters.
+
+    Supports exact value matching and range filters for numeric attributes.
+    """
     return execute_document_query(
         db=db,
         collection_name=collection_name,
         product_name=product_name,
-        request=payload,
+        request=query_request,
     )
 
 

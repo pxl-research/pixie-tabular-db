@@ -26,7 +26,9 @@ def describe_attributes(
     # Step 1: Analyze attribute types
     attributes = {}
     for column_name, datatype in file_schema.items():
-        logging.info(f"Analyzing attribute '{column_name}' with datatype '{datatype}'")
+        logging.info(
+            "Analyzing attribute '%s' with datatype '%s'", column_name, datatype
+        )
         attributes[column_name] = analyze_attribute(column_name, df, datatype)
 
     # Step 2: Generate descriptions
