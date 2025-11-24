@@ -1,9 +1,11 @@
+name: pixie-tabular
+
 services:
-  api:
+  tabular-api:
     build:
       context: ../../api
       dockerfile: Dockerfile
-    container_name: pixie_postgres_api
+    container_name: pixie_tabular_api
     restart: unless-stopped
     env_file:
       - ../../.env.dev
@@ -19,7 +21,7 @@ services:
     build:
       context: ../../db
       dockerfile: Dockerfile
-    container_name: pixie_postgres_db
+    container_name: pixie_tabular_postgres_db
     restart: unless-stopped
     env_file:
       - ../../.env.dev
@@ -35,7 +37,7 @@ services:
 
   adminer:
     image: adminer:latest
-    container_name: pixie_postgres_adminer
+    container_name: pixie_tabular_adminer
     depends_on:
       - db
     env_file:
