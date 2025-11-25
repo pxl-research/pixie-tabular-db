@@ -24,7 +24,7 @@ from .llm_dependency_providers import (
     get_attribute_ranker_llm,
 )
 
-router = APIRouter()
+router = APIRouter(prefix="/collections/{collection_name}/documents")
 
 logger = logging.getLogger(__name__)
 

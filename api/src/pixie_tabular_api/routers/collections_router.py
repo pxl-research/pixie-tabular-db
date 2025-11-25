@@ -11,7 +11,7 @@ from ..services.collections_service import (
     list_collections as list_collections_service,
 )
 
-router = APIRouter()
+router = APIRouter(prefix="/collections")
 
 
 @router.post("", response_model=Collection, status_code=201)

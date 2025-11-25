@@ -5,7 +5,7 @@ from ..database import get_db
 from ..schemas import DocumentQueryRequest, DocumentQueryResponse
 from ..services.queries_service import execute_document_query
 
-router = APIRouter()
+router = APIRouter(prefix="/collections/{collection_name}/products")
 
 
 @router.post("/{product_name}/query", response_model=DocumentQueryResponse)
