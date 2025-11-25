@@ -10,14 +10,16 @@ services:
     env_file:
       - ../../.env.dev
     depends_on:
-      db:
+      tabular-db:
         condition: service_healthy
     ports:
       - "${API_PORT:-8000}:8000"
     environment:
-      DB_HOST: db
+      DB_HOST: tabular-db
+    networks:
+      - pixie-network
 
-  db:
+  tabular-db:
     build:
       context: ../../db
       dockerfile: Dockerfile
@@ -34,23 +36,27 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    networks:
+      - pixie-network
 
   adminer:
     image: adminer:latest
     container_name: pixie_tabular_adminer
     depends_on:
-      - db
+      - tabular-db
     env_file:
       - ../../.env.dev
     environment:
-      ADMINER_DEFAULT_SERVER: db
+      ADMINER_DEFAULT_SERVER: tabular-db
     ports:
       - "${ADMINER_PORT:-8080}:8080"
+    networks:
+      - pixie-network
 
 volumes:
   pgdata:
 
 networks:
-  default:
+  pixie-network:
     external: true
     name: pixie-network

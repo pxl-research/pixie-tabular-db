@@ -29,7 +29,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.post("/", response_model=List[Document], status_code=201)
+@router.post("", response_model=List[Document], status_code=201)
 def add_document(
     collection_name: str,
     file: UploadFile = File(...),
@@ -82,7 +82,7 @@ def add_document(
     return [Document(**db_result) for db_result in stored_results]
 
 
-@router.get("/", response_model=List[Document])
+@router.get("", response_model=List[Document])
 def list_documents(
     collection_name: str,
     db: Session = Depends(get_db),

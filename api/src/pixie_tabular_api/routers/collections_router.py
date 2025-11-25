@@ -14,7 +14,7 @@ from ..services.collections_service import (
 router = APIRouter()
 
 
-@router.post("/", response_model=Collection, status_code=201)
+@router.post("", response_model=Collection, status_code=201)
 def create_collection(
     create_request: CollectionCreate, db: Session = Depends(get_db)
 ) -> Collection:
@@ -22,7 +22,7 @@ def create_collection(
     return create_collection_service(db=db, create_request=create_request)
 
 
-@router.get("/", response_model=List[Collection])
+@router.get("", response_model=List[Collection])
 def list_collections(db: Session = Depends(get_db)) -> List[Collection]:
     """List all available collections with their document counts."""
     return list_collections_service(db=db)
