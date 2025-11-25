@@ -4,8 +4,12 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..schemas import DocumentQueryRequest, DocumentQueryResponse
 from ..services.queries_service import execute_document_query
+from ..security import require_api_key
 
-router = APIRouter(prefix="/collections/{collection_name}/products")
+router = APIRouter(
+    prefix="/collections/{collection_name}/products",
+    dependencies=[Depends(require_api_key)],
+)
 
 
 @router.post("/{product_name}/query", response_model=DocumentQueryResponse)

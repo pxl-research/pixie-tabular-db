@@ -19,12 +19,16 @@ from ..services.documents_service import (
     read_uploaded_file,
     store_documents,
 )
+from ..security import require_api_key
 from .llm_dependency_providers import (
     get_attribute_describer_llm,
     get_attribute_ranker_llm,
 )
 
-router = APIRouter(prefix="/collections/{collection_name}/documents")
+router = APIRouter(
+    prefix="/collections/{collection_name}/documents",
+    dependencies=[Depends(require_api_key)],
+)
 
 logger = logging.getLogger(__name__)
 

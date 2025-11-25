@@ -5,13 +5,17 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..schemas import Collection, CollectionCreate
+from ..security import require_api_key
 from ..services.collections_service import (
     create_collection as create_collection_service,
     delete_collection as delete_collection_service,
     list_collections as list_collections_service,
 )
 
-router = APIRouter(prefix="/collections")
+router = APIRouter(
+    prefix="/collections",
+    dependencies=[Depends(require_api_key)],
+)
 
 
 @router.post("", response_model=Collection, status_code=201)
