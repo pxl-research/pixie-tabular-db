@@ -17,10 +17,10 @@ def require_api_key(api_key: str | None = Depends(_API_KEY_HEADER)) -> None:
 
     Raises HTTPException if API key is missing, invalid, or not configured.
     """
-    expected_api_key = get_settings().pixie_api_key
+    expected_api_key = get_settings().tabular_api_key
 
     if expected_api_key is None:
-        logging.warning("PIXIE_API_KEY is not configured; rejecting request")
+        logging.warning("TABULAR_API_KEY is not configured; rejecting request")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="API key authentication is not configured",

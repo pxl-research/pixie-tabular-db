@@ -13,9 +13,13 @@ services:
       tabular-db:
         condition: service_healthy
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "8002:8000"
     environment:
       DB_HOST: tabular-db
+      DB_PORT: 5432
+      POSTGRES_DB: pixie_tabular
+      POSTGRES_USER: pixie
+      POSTGRES_PASSWORD: devpassword
     networks:
       - pixie-network
 
@@ -25,10 +29,12 @@ services:
       dockerfile: Dockerfile
     container_name: pixie_tabular_postgres_db
     restart: unless-stopped
-    env_file:
-      - ../../.env.dev
+    environment:
+      POSTGRES_DB: pixie_tabular
+      POSTGRES_USER: pixie
+      POSTGRES_PASSWORD: devpassword
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -44,12 +50,10 @@ services:
     container_name: pixie_tabular_adminer
     depends_on:
       - tabular-db
-    env_file:
-      - ../../.env.dev
     environment:
       ADMINER_DEFAULT_SERVER: tabular-db
     ports:
-      - "${ADMINER_PORT:-8080}:8080"
+      - "8080:8080"
     networks:
       - pixie-network
 

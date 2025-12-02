@@ -15,7 +15,7 @@ class Settings:
     postgres_host: str = "db"
     postgres_port: int = 5432
 
-    pixie_api_key: Optional[str] = None
+    tabular_api_key: Optional[str] = None
 
     azure_openai_endpoint: Optional[str] = None
     azure_openai_api_key: Optional[str] = None
@@ -54,7 +54,7 @@ def _read_settings() -> Settings:
         postgres_password=os.getenv("POSTGRES_PASSWORD"),
         postgres_host=os.getenv("DB_HOST") or "db",
         postgres_port=int(os.getenv("DB_PORT", 5432)),
-        pixie_api_key=os.getenv("PIXIE_API_KEY"),
+        tabular_api_key=os.getenv("TABULAR_API_KEY"),
         azure_openai_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         azure_openai_api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         azure_openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
