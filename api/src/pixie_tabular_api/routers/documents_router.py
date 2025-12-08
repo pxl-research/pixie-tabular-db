@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import List
+from typing import Any, List
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import text
@@ -11,6 +11,7 @@ from ..database import get_db
 from ..schemas import Document, DocumentUpdate
 from ..services import AttributeDescriberLLM, AttributeRankerLLM
 from ..services.documents_service import (
+    extract_file_extension,
     normalize_to_dict,
     get_collection_id,
     normalize_collection_name,
@@ -31,6 +32,80 @@ router = APIRouter(
 )
 
 logger = logging.getLogger(__name__)
+DEFAULT_STORAGE_TARGET = "pixie-tabular-db"
+
+
+def _normalize_row_count(value: Any) -> int | None:
+    """Convert row_count field into a non-negative integer when possible."""
+    if value is None:
+        return None
+    try:
+        count = int(value)
+        return max(count, 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_document(
+    *,
+    collection: str,
+    document_id: int,
+    file_name: str,
+    product: str | None,
+    row_count: Any,
+    language: str | None,
+    description: str | None,
+    attribute_descriptions_raw: Any,
+    file_schema_raw: Any,
+    fallback_columns: List[str] | None = None,
+    original_file_type: str | None = None,
+) -> Document:
+    """Create a Document response populated with defaults and derived fields."""
+    file_schema = normalize_to_dict(file_schema_raw)
+    columns = fallback_columns or []
+    schema_columns = file_schema.get("columns") if isinstance(file_schema, dict) else None
+    if isinstance(schema_columns, list):
+        columns = schema_columns
+
+    planned_storage_targets = []
+    if isinstance(file_schema, dict):
+        schema_planned = file_schema.get("planned_storage_targets")
+        if isinstance(schema_planned, list):
+            planned_storage_targets = schema_planned
+    storage_target = (
+        file_schema.get("storage_target") if isinstance(file_schema, dict) else None
+    ) or DEFAULT_STORAGE_TARGET
+
+    requires_preprocessing = False
+    if isinstance(file_schema, dict):
+        requires_preprocessing = bool(file_schema.get("requires_preprocessing", False))
+
+    file_extension = None
+    if isinstance(file_schema, dict):
+        file_extension = file_schema.get("file_extension") or None
+        if original_file_type is None:
+            original_file_type = file_schema.get("original_file_type") or None
+    if not file_extension:
+        file_extension = extract_file_extension(file_name)
+
+    attribute_descriptions = normalize_to_dict(attribute_descriptions_raw) or None
+
+    return Document(
+        id=document_id,
+        file_name=file_name,
+        collection=collection,
+        storage_target=storage_target,
+        planned_storage_targets=planned_storage_targets,
+        file_extension=file_extension,
+        original_file_type=original_file_type,
+        product=product,
+        row_count=_normalize_row_count(row_count),
+        columns=columns,
+        attribute_descriptions=attribute_descriptions,
+        language=language,
+        description=description,
+        requires_preprocessing=requires_preprocessing,
+    )
 
 
 @router.post("", response_model=List[Document], status_code=201)
@@ -61,6 +136,7 @@ def add_document(
 
     prepared_documents = prepare_documents(
         file_name=file_name,
+        content_type=file.content_type,
         file_content=content,
         parsed_documents=parsed_documents,
         product_prefix=product_prefix,
@@ -83,7 +159,22 @@ def add_document(
         collection,
     )
 
-    return [Document(**db_result) for db_result in stored_results]
+    return [
+        _build_document(
+            collection=collection,
+            document_id=db_result["id"],
+            file_name=db_result["file_name"],
+            product=db_result.get("product"),
+            row_count=db_result.get("row_count"),
+            language=db_result.get("language"),
+            description=db_result.get("description"),
+            attribute_descriptions_raw=db_result.get("attribute_descriptions"),
+            file_schema_raw=db_result.get("file_schema"),
+            fallback_columns=db_result.get("columns"),
+            original_file_type=file.content_type or None,
+        )
+        for db_result in stored_results
+    ]
 
 
 @router.get("", response_model=List[Document])
@@ -118,35 +209,20 @@ def list_documents(
         {"collection_id": collection_id},
     ).fetchall()
 
-    documents: List[Document] = []
-    for row in rows:
-        file_schema = normalize_to_dict(row.file_schema)
-        attribute_descriptions = normalize_to_dict(row.attribute_descriptions)
-        columns = file_schema.get("columns")
-        if not isinstance(columns, list):
-            columns = []
-
-        row_count = row.row_count
-        try:
-            row_count_int = int(row_count)
-        except (TypeError, ValueError):
-            row_count_int = 0
-
-        documents.append(
-            Document(
-                id=row.id,
-                file_name=row.file_name,
-                collection=trimmed_collection,
-                product=row.product_name,
-                row_count=row_count_int,
-                columns=columns,
-                attribute_descriptions=attribute_descriptions or None,
-                language=row.language,
-                description=row.file_description,
-            )
+    return [
+        _build_document(
+            collection=trimmed_collection,
+            document_id=row.id,
+            file_name=row.file_name,
+            product=row.product_name,
+            row_count=row.row_count,
+            language=row.language,
+            description=row.file_description,
+            attribute_descriptions_raw=row.attribute_descriptions,
+            file_schema_raw=row.file_schema,
         )
-
-    return documents
+        for row in rows
+    ]
 
 
 @router.patch("/{document_id}", response_model=Document)
@@ -161,6 +237,8 @@ def update_document(
 
     update_data = update_request.model_dump(exclude_unset=True)
     rank_updates = update_data.pop("attribute_ranks", None)
+    if update_data.get("product") is None and "product" in update_data:
+        raise HTTPException(status_code=400, detail="product may not be null")
 
     column_map = {
         "product": "product_name",
@@ -273,102 +351,43 @@ def update_document(
         db.rollback()
         raise
 
-    file_schema = normalize_to_dict(row.file_schema)
-    attribute_descriptions = normalize_to_dict(row.attribute_descriptions)
-    columns = file_schema.get("columns")
-    if not isinstance(columns, list):
-        columns = []
-
-    row_count = row.row_count
-    try:
-        row_count_int = int(row_count)
-    except (TypeError, ValueError):
-        row_count_int = 0
-
-    return Document(
-        id=row.id,
-        file_name=row.file_name,
+    return _build_document(
         collection=trimmed_collection,
+        document_id=row.id,
+        file_name=row.file_name,
         product=row.product_name,
-        row_count=row_count_int,
-        columns=columns,
-        attribute_descriptions=attribute_descriptions or None,
+        row_count=row.row_count,
         language=row.language,
         description=row.file_description,
+        attribute_descriptions_raw=row.attribute_descriptions,
+        file_schema_raw=row.file_schema,
     )
 
 
-@router.delete("/{identifier}", status_code=204)
+@router.delete("/{document_id}", status_code=204)
 def delete_document(
     collection_name: str,
-    identifier: str,
+    document_id: int,
     db: Session = Depends(get_db),
 ) -> None:
     trimmed_collection = normalize_collection_name(collection_name)
-    trimmed_identifier = identifier.strip()
+    collection_id = get_collection_id(db, trimmed_collection)
 
-    if not trimmed_identifier:
-        raise HTTPException(
-            status_code=400, detail="Collection and identifier are required"
-        )
-
-    collection_row = db.execute(
-        text("SELECT id FROM tabular_collections WHERE name = :name"),
-        {"name": trimmed_collection},
-    ).fetchone()
-    if collection_row is None:
-        raise HTTPException(status_code=404, detail="Collection not found")
-
-    # Attempt full upload deletion by matching file name first
-    file_match = db.execute(
-        text(
-            """
-            SELECT id
-            FROM tabular_documents
-            WHERE collection_id = :collection_id AND file_name = :file_name
-            """
-        ),
-        {"collection_id": collection_row.id, "file_name": trimmed_identifier},
-    ).fetchall()
-
-    if file_match:
-        try:
-            db.execute(
-                text(
-                    """
-                    DELETE FROM tabular_documents
-                    WHERE collection_id = :collection_id AND file_name = :file_name
-                    """
-                ),
-                {"collection_id": collection_row.id, "file_name": trimmed_identifier},
-            )
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        logger.info(
-            "Deleted document(s) for collection '%s' via file identifier '%s'",
-            trimmed_collection,
-            trimmed_identifier,
-        )
-        return None
-
-    # Fall back to deleting by product name
-    mapping = db.execute(
+    deleted_row = db.execute(
         text(
             """
             DELETE FROM tabular_documents
-            WHERE collection_id = :collection_id AND product_name = :product_name
+            WHERE collection_id = :collection_id AND id = :document_id
             RETURNING id
             """
         ),
         {
-            "collection_id": collection_row.id,
-            "product_name": trimmed_identifier,
+            "collection_id": collection_id,
+            "document_id": document_id,
         },
     ).fetchone()
 
-    if mapping is None:
+    if deleted_row is None:
         db.rollback()
         raise HTTPException(status_code=404, detail="Document not found in collection")
 
@@ -378,9 +397,7 @@ def delete_document(
         db.rollback()
         raise
     logger.info(
-        "Deleted document(s) for collection '%s' via product identifier '%s'",
-        trimmed_collection,
-        trimmed_identifier,
+        "Deleted document '%s' from collection '%s'", document_id, trimmed_collection
     )
 
 

@@ -16,15 +16,20 @@ class Collection(BaseModel):
 
 
 class Document(BaseModel):
-    id: int
+    id: Annotated[int, Field(ge=0)]
     file_name: str
     collection: str
+    storage_target: Literal["pixie-tabular-db", "pixie-rag-db"] = "pixie-tabular-db"
+    planned_storage_targets: List[str] = Field(default_factory=list)
+    file_extension: str | None = None
+    original_file_type: str | None = None
     product: str | None = None
-    row_count: int
-    columns: List[str]
-    attribute_descriptions: Dict[str, Dict[str, Any]] | None = None
+    row_count: Annotated[int | None, Field(default=None, ge=0)] = None
+    columns: List[str] = Field(default_factory=list)
+    attribute_descriptions: Dict[str, Any] | None = None
     language: str | None = None
     description: str | None = None
+    requires_preprocessing: bool = False
 
 
 class DocumentUpdate(BaseModel):
@@ -37,8 +42,6 @@ class DocumentUpdate(BaseModel):
     def validate_fields(self) -> "DocumentUpdate":
         if not self.model_fields_set:
             raise ValueError("At least one field must be provided")
-        if "product" in self.model_fields_set and self.product is None:
-            raise ValueError("product may not be null")
         if "attribute_ranks" in self.model_fields_set:
             if not self.attribute_ranks:
                 raise ValueError("attribute_ranks may not be empty")

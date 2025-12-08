@@ -14,6 +14,7 @@ import pandas as pd
 from fastapi import HTTPException, UploadFile
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
+from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, DatabaseError
 from sqlalchemy.orm import Session
@@ -160,6 +161,8 @@ class PreparedDocument:
     """Normalized document payload ready for database insertion."""
 
     file_name: str
+    file_extension: str | None
+    original_file_type: str | None
     file_hash: str
     product_name: str
     language: str | None
@@ -168,9 +171,20 @@ class PreparedDocument:
     field_types: Dict[str, str]
     attribute_descriptions: Dict[str, Any]
     rows: List[dict[str, Any]]
+    requires_preprocessing: bool
+    planned_storage_targets: List[str]
+    storage_target: str
 
     def schema_payload(self) -> Dict[str, Any]:
-        return {"columns": self.columns, "field_types": self.field_types}
+        return {
+            "columns": self.columns,
+            "field_types": self.field_types,
+            "file_extension": self.file_extension,
+            "original_file_type": self.original_file_type,
+            "requires_preprocessing": self.requires_preprocessing,
+            "planned_storage_targets": self.planned_storage_targets,
+            "storage_target": self.storage_target,
+        }
 
 
 def normalize_collection_name(collection_name: str) -> str:
@@ -215,12 +229,13 @@ def parse_uploaded_documents(file_name: str, content: bytes) -> List[ParsedDocum
     except UnsupportedDocumentType as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DocumentParseError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def prepare_documents(
     *,
     file_name: str,
+    content_type: str | None = None,
     file_content: bytes,
     parsed_documents: Sequence[ParsedDocument],
     product_prefix: str | None,
@@ -237,6 +252,9 @@ def prepare_documents(
     sheet_description = (
         description.strip() if description and description.strip() else None
     )
+    file_extension = extract_file_extension(file_name)
+    planned_storage_targets: List[str] = []
+    storage_target = "pixie-tabular-db"
 
     prepared_documents: List[PreparedDocument] = []
 
@@ -286,6 +304,8 @@ def prepare_documents(
         prepared_documents.append(
             PreparedDocument(
                 file_name=file_name,
+                file_extension=file_extension,
+                original_file_type=content_type,
                 file_hash=sheet_hash,
                 product_name=product_name,
                 language=language,
@@ -294,6 +314,9 @@ def prepare_documents(
                 field_types=inferred_schema,
                 attribute_descriptions=attribute_descriptions,
                 rows=list(parsed_document.rows),
+                requires_preprocessing=False,
+                planned_storage_targets=planned_storage_targets,
+                storage_target=storage_target,
             )
         )
 
@@ -369,6 +392,7 @@ def store_documents(
                 {
                     "id": document_id,
                     "file_name": prepared.file_name,
+                    "file_schema": prepared.schema_payload(),
                     "collection": collection_name,
                     "product": prepared.product_name,
                     "row_count": len(prepared.rows),
@@ -488,6 +512,16 @@ def json_default(value: Any):
     return str(value)
 
 
+def extract_file_extension(file_name: str) -> str | None:
+    """Return the file extension without leading dot, or None if unavailable."""
+
+    suffix = Path(file_name).suffix
+    if not suffix:
+        return None
+    trimmed = suffix.lstrip(".").lower()
+    return trimmed or None
+
+
 __all__ = [
     "DocumentParseError",
     "DocumentStorageError",
@@ -501,6 +535,7 @@ __all__ = [
     "infer_schema",
     "json_default",
     "normalize_collection_name",
+    "extract_file_extension",
     "parse_document",
     "parse_uploaded_documents",
     "prepare_documents",
