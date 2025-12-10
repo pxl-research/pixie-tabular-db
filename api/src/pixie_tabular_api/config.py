@@ -20,7 +20,7 @@ class Settings:
     tabular_api_key: Optional[str] = None
 
     azure_openai_endpoint: Optional[str] = None
-    azure_openai_api_key: Optional[str] = None
+    azure_openai_key: Optional[str] = None
     azure_openai_api_version: Optional[str] = None
     azure_openai_model_version: Optional[str] = None
 
@@ -39,7 +39,7 @@ class Settings:
         return all(
             [
                 self.azure_openai_endpoint,
-                self.azure_openai_api_key,
+                self.azure_openai_key,
                 self.azure_openai_api_version,
                 self.azure_openai_model_version,
             ]
@@ -50,7 +50,7 @@ def _read_settings() -> Settings:
     return Settings(
         tabular_api_key=os.getenv("TABULAR_API_KEY"),
         azure_openai_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        azure_openai_api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+        azure_openai_key=os.getenv("AZURE_OPENAI_KEY"),
         azure_openai_api_version=os.getenv("BASE_AZURE_OPENAI_API_VERSION"),
         azure_openai_model_version=os.getenv("BASE_AZURE_OPENAI_MODEL_VERSION"),
         log_level=os.getenv("LOG_LEVEL", "INFO"),

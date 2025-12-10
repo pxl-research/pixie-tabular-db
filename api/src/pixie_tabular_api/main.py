@@ -29,14 +29,14 @@ def _configure_attribute_describer(app: FastAPI) -> None:
 
     # After azure_llm_configured check, we know these values are not None
     assert settings.azure_openai_endpoint is not None
-    assert settings.azure_openai_api_key is not None
+    assert settings.azure_openai_key is not None
     assert settings.azure_openai_api_version is not None
     assert settings.azure_openai_model_version is not None
 
     try:
         azure_llm = AzureOpenAILLM(
             endpoint=settings.azure_openai_endpoint,
-            api_key=settings.azure_openai_api_key,
+            api_key=settings.azure_openai_key,
             api_version=settings.azure_openai_api_version,
             deployment=settings.azure_openai_model_version,
         )
