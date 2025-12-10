@@ -6,14 +6,16 @@ from functools import lru_cache
 from typing import Optional
 from urllib.parse import quote_plus
 
+from .internal_defaults import DEFAULT_POSTGRES
+
 
 @dataclass(frozen=True)
 class Settings:
-    postgres_db: str = "pixie_tabular"
-    postgres_user: str = "pixie"
-    postgres_password: str | None = None
-    postgres_host: str = "db"
-    postgres_port: int = 5432
+    postgres_db: str = DEFAULT_POSTGRES["db"]
+    postgres_user: str = DEFAULT_POSTGRES["user"]
+    postgres_password: str = DEFAULT_POSTGRES["password"]
+    postgres_host: str = DEFAULT_POSTGRES["host"]
+    postgres_port: int = DEFAULT_POSTGRES["port"]
 
     tabular_api_key: Optional[str] = None
 
@@ -26,9 +28,6 @@ class Settings:
 
     @property
     def database_url(self) -> str:
-        if self.postgres_password is None:
-            raise RuntimeError("POSTGRES_PASSWORD must be configured")
-
         password = quote_plus(self.postgres_password)
         return (
             f"postgresql+psycopg://{self.postgres_user}:{password}"
@@ -49,11 +48,6 @@ class Settings:
 
 def _read_settings() -> Settings:
     return Settings(
-        postgres_db=os.getenv("POSTGRES_DB") or "pixie_tabular",
-        postgres_user=os.getenv("POSTGRES_USER") or "pixie",
-        postgres_password=os.getenv("POSTGRES_PASSWORD"),
-        postgres_host=os.getenv("DB_HOST") or "db",
-        postgres_port=int(os.getenv("DB_PORT", 5432)),
         tabular_api_key=os.getenv("TABULAR_API_KEY"),
         azure_openai_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         azure_openai_api_key=os.getenv("AZURE_OPENAI_API_KEY"),
